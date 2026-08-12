@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jellyfin
+  namespace: media
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"
+    checkov.io/skip2: "CKV_K8S_9"
+    checkov.io/skip3: "CKV_K8S_25"
+    checkov.io/skip4: "CKV_K8S_35"
+    checkov.io/skip5: "CKV_K8S_40"
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: jellyfin
+  template:
+    metadata:
+      labels:
+        app: jellyfin
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: jellyfin
+        image: jellyfin/jellyfin@sha256:d20137292584fc6188532d80dd5a56cc4bd1c6055730f6b7552499ee22ab92c2
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8096
+        volumeMounts:
+        - name: jellyfin-pvc
+          mountPath: /config
+          subPath: jellyfin/config
+        - name: jellyfin-pvc
+          mountPath: /cache
+          subPath: jellyfin/cache
+        - name: jellyfin-pvc
+          mountPath: /media
+          subPath: jellyfin/media
+        - name: tmp-volume
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+            add:
+              - CHOWN
+          runAsNonRoot: true
+          runAsUser: 1000                          
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            memory: "768Mi"
+            cpu:    "750m"
+          limits:
+            memory: "2Gi"
+            cpu:    "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8096
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+      volumes:
+      - name: jellyfin-pvc
+        persistentVolumeClaim:
+          claimName: jellyfin-pvc
+      - name: tmp-volume
+        emptyDir: {}

@@ -1,0 +1,21 @@
+machine:
+  install:
+    disk: ${install_disk}
+    # Factory image carrying the system extensions from files/schematic.yaml.
+    # Note the repository is "metal-installer", not "installer".
+    image: factory.talos.dev/metal-installer/${schematic_id}:${talos_version}
+  network:
+    hostname: ${hostname}
+---
+# Talos 1.12+ moved the hostname into its own HostnameConfig document, and the
+# generated config ships one containing "auto: stable". That cannot coexist with
+# the static machine.network.hostname set above — applying both fails with
+# "static hostname is already set in v1alpha1 config".
+#
+# Merging our own HostnameConfig does not help: "auto: stable" survives the
+# merge and Talos then rejects "'auto' and 'hostname' cannot be set at the same
+# time". The document has to be removed outright, which is what $patch: delete
+# does. The v1alpha1 field above is then the only hostname source.
+apiVersion: v1alpha1
+kind: HostnameConfig
+$patch: delete

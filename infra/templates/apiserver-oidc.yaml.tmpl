@@ -1,0 +1,12 @@
+cluster:
+  apiServer:
+    extraArgs:
+      # Headlamp passes the Keycloak id_token straight to the API server, so
+      # without these flags login succeeds and every API call returns 403.
+      #
+      # Grant access by binding Keycloak groups to ClusterRoles, e.g. a group
+      # "k8s-admins" -> cluster-admin, "k8s-viewers" -> view.
+      oidc-issuer-url: ${oidc_issuer_url}
+      oidc-client-id: ${oidc_client_id}
+      oidc-username-claim: ${oidc_username_claim}
+      oidc-groups-claim: ${oidc_groups_claim}

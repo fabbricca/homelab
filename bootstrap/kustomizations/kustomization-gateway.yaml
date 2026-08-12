@@ -1,0 +1,23 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: gateway
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/gateway
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # The Gateway terminates TLS with the wildcard certificate, so the
+    # Certificate and its ReferenceGrant must exist first.
+    - name: letsencrypt-wildcard-cert
+      namespace: flux-system
+  healthChecks:
+    - apiVersion: gateway.networking.k8s.io/v1
+      kind: Gateway
+      name: main
+      namespace: gateway

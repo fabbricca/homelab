@@ -1,0 +1,21 @@
+# Gateway API forbids cross-namespace Secret references unless the *target*
+# namespace explicitly allows them. This grant lets the Gateway in the "gateway"
+# namespace terminate TLS with the wildcard certificate issued here, so the
+# certificate does not have to be duplicated or replicated per namespace.
+#
+# ReferenceGrant is served as both v1 and v1beta1 in Gateway API v1.6.1;
+# v1beta1 is the storage version.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: gateway-to-wildcard-cert
+  namespace: letsencrypt-wildcard-cert
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: gateway
+  to:
+    - group: ""
+      kind: Secret
+      name: letsencrypt-wildcard-cert-iberu.me

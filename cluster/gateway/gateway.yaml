@@ -1,0 +1,44 @@
+# Replaces ingress-nginx, which was archived upstream in March 2026 and will
+# receive no further security patches.
+#
+# The controller is Cilium's, enabled in the Talos machine config (infra/), so
+# there is no separate ingress controller Deployment to run. Cilium creates a
+# LoadBalancer Service named "cilium-gateway-main" in this namespace, which is
+# what the newt tunnel points at.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: main
+  namespace: gateway
+spec:
+  gatewayClassName: cilium
+  listeners:
+    # The newt/Pangolin tunnel terminates TLS at the edge and forwards plain
+    # HTTP into the cluster, so this listener carries all tunnelled traffic.
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+
+    # Used for direct access from the LAN. Listener hostnames are deliberately
+    # unset so a single listener serves every host; each HTTPRoute declares its
+    # own hostname instead.
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          # Cross-namespace reference, permitted by the ReferenceGrant in
+          # cluster/letsencrypt-wildcard-cert/. This is why the per-service
+          # certificates (keycloak-tls, minio-tls) are no longer needed: TLS
+          # terminates once here using the existing wildcard.
+          - kind: Secret
+            group: ""
+            name: letsencrypt-wildcard-cert-iberu.me
+            namespace: letsencrypt-wildcard-cert
+      allowedRoutes:
+        namespaces:
+          from: All

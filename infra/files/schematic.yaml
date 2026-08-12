@@ -1,0 +1,40 @@
+# Source of truth for the Talos Image Factory schematic.
+#
+# This file is NOT read by Terraform — it documents what produced the schematic
+# ID pinned in variables.tf (var.talos_schematic_id). After editing, re-register
+# it and update that variable:
+#
+#   curl -X POST --data-binary @infra/files/schematic.yaml \
+#     https://factory.talos.dev/schematics
+#
+# Registration is idempotent: identical content always yields the same ID.
+# Changing this list changes the ID, which changes both the installer image and
+# the boot ISO — and applying it to running nodes means talosctl upgrade.
+#
+# Resulting images:
+#   installer: factory.talos.dev/metal-installer/<id>:<talos_version>
+#   boot ISO:  https://factory.talos.dev/image/<id>/<talos_version>/metal-amd64.iso
+#
+# Deliberately absent:
+#   nfs-utils  - csi-driver-nfs consumes NFS through its own driver pods, not
+#                host-level mount.nfs, so the extension adds nothing on Talos
+#   KubeVirt   - needs no extension; VT-x in the BIOS is the only prerequisite
+#   NIC firmware - the EliteDesk 800 G2 DM has an onboard Intel I219-LM, which
+#                needs no firmware blob
+customization:
+  systemExtensions:
+    officialExtensions:
+      # Intel iGPU (HD Graphics 530) — Jellyfin QuickSync transcoding
+      - siderolabs/i915
+      - siderolabs/intel-ucode
+      # iscsiadm on every node — required by the Synology CSI driver
+      - siderolabs/iscsi-tools
+      # Graceful poweroff on AC loss, driven by the Synology acting as NUT server
+      - siderolabs/nut-client
+      # nvme smart-log over talosctl, for wear and health on the NVMe boot disks
+      - siderolabs/nvme-cli
+      # Node-level remote access; keeps talosctl reachable even when k8s is down
+      - siderolabs/tailscale
+      # blkid/fsck/mkfs — needed to format the raw iSCSI LUNs the Synology CSI
+      # provisions. iscsi-tools supplies the initiator but not the fs tooling.
+      - siderolabs/util-linux-tools

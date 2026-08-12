@@ -1,0 +1,12 @@
+kubeconfig
+talosconfig
+.terraform.lock.hcl
+.terraform/
+age.key
+.directory
+
+# Secrets live here because the HCP workspace runs in Local execution mode,
+# where workspace variables are not evaluated. Never commit these.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example

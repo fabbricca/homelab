@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: letsencrypt-wildcard-cert-iberu.me-staging
+  namespace: letsencrypt-wildcard-cert
+spec:
+  secretName: letsencrypt-wildcard-cert-iberu.me-staging 
+  issuerRef:
+    name: letsencrypt-staging
+    kind: ClusterIssuer
+  dnsNames:
+    - "iberu.me"
+    - "*.iberu.me"

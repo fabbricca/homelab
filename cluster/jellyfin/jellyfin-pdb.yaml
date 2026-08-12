@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: jellyfin-pdb
+  namespace: media
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: jellyfin

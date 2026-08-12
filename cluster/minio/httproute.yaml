@@ -1,0 +1,49 @@
+# Replaces ingress.yaml. Two hostnames, so two routes.
+#
+# NOTE: the old Ingress set nginx.ingress.kubernetes.io/proxy-body-size to 500m
+# for large S3 uploads. Gateway API has no portable equivalent — request body
+# limits are a property of the data plane (Envoy, via Cilium). If large uploads
+# start failing, that is the first thing to check.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-api
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    # S3-compatible API. MinIO presigned URLs validate on host, not scheme, so
+    # TLS terminating at the edge stays transparent to signature validation.
+    - minio.iberu.me
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9000
+      timeouts:
+        request: 300s
+        backendRequest: 300s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-console
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - minio-console.iberu.me
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9001
+      timeouts:
+        request: 300s
+        backendRequest: 300s

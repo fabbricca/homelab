@@ -1,0 +1,11 @@
+# Replaces the former MetalLB IPAddressPool (cluster/metallb/metallb-config/ip-pool.yaml).
+# Cilium itself is installed by Terraform via Talos inlineManifests, not by Flux —
+# only its runtime configuration lives here.
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lb-pool
+spec:
+  blocks:
+    - start: "10.0.0.150"
+      stop: "10.0.0.254"

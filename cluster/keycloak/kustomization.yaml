@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: keycloak
+# Shared Keycloak identity provider.
+# Tenant isolation is done at the realm level:
+#   each platform gets its own realm, keeping users/clients/sessions fully separated.
+#
+# Public URL: https://keycloak.iberu.me
+# Register this site in Pangolin's admin UI pointing to the Newt tunnel → Cilium Gateway.
+#
+# Runs the upstream keycloak image; realms are created in the admin UI, or
+# imported by mounting them at /opt/keycloak/data/import (see deployment.yaml).
+resources:
+  - pvc.yaml
+  - secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

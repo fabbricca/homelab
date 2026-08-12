@@ -1,0 +1,11 @@
+---
+apiVersion: v1alpha1
+kind: ExtensionServiceConfig
+name: tailscale
+environment:
+  - TS_AUTHKEY=${tailscale_auth_key}
+  - TS_HOSTNAME=${hostname}
+  # Advertising the server subnet is what lets your laptop and phone reach
+  # 10.0.0.0/24 from anywhere. Both nodes advertise it, so one can fail without
+  # losing access. Routes must be approved once in the Tailscale admin console.
+  - TS_ROUTES=${advertise_routes}

@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# These are NOT set as HCP workspace variables. The workspace runs in Local
+# execution mode — required, because remote runs execute on HashiCorp's
+# infrastructure and cannot reach the Talos API on 10.0.0.x — and HCP does not
+# evaluate workspace variables in that mode.
+#
+# Every value below is optional. Leave one unset and that feature stays off;
+# nothing else breaks. You can bring the cluster up with this file absent
+# entirely and add the integrations later.
+
+# --- UPS ----------------------------------------------------------------
+# The Eaton connects by USB to the Synology, which acts as the NUT primary.
+# Set these once "network UPS server" is enabled in DSM.
+# nut_server_host = "ups@10.0.0.15"
+# nut_username    = "monuser"
+# nut_password    = ""
+
+# --- Tailscale ----------------------------------------------------------
+# A reusable auth key from the Tailscale admin console. Nodes advertise
+# 10.0.0.0/24; approve that route once after they first connect.
+# tailscale_auth_key = "tskey-auth-..."
+
+# --- API server OIDC ----------------------------------------------------
+# Leave unset for the initial build. Keycloak runs inside this cluster, so
+# pointing the API server at it during bootstrap is a dependency loop. Enable
+# once Keycloak is reconciled and reachable.
+# oidc_issuer_url = "https://keycloak.iberu.me/realms/homelab"

@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/component: auth
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: "2026-03-19T00:00:00Z"
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/component: auth
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: keycloak
+          # Upstream image, pinned. Previously a custom build that baked in a
+          # realm for a platform since retired; with that gone there is nothing
+          # left to bundle and no reason to maintain an image.
+          #
+          # Realms are now created in the admin UI. To import one declaratively
+          # instead, mount it at /opt/keycloak/data/import from a ConfigMap and
+          # add "--import-realm" back to args below.
+          image: quay.io/keycloak/keycloak:26.7.1
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/keycloak/bin/kc.sh"]
+          # NOTE: start-dev with the embedded H2 database is not a production
+          # configuration. Fine while Keycloak only serves this homelab, but it
+          # should move to "start" backed by the Postgres in cluster/postgres/
+          # before it becomes the SSO provider for the cluster itself.
+          args: ["start-dev"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+          env:
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # nginx ingress does TLS termination; Keycloak runs HTTP behind it.
+            # KC_PROXY_HEADERS=xforwarded tells Keycloak 26+ to trust X-Forwarded-Proto
+            # from nginx so it generates correct https:// issuer URLs in tokens.
+            # (KC_PROXY=edge was removed in Keycloak 26)
+            - name: KC_PROXY_HEADERS
+              value: "xforwarded"
+          envFrom:
+            - secretRef:
+                name: keycloak-secret
+          volumeMounts:
+            # Only the H2 subdirectory is mounted, leaving /opt/keycloak/data
+            # writable for anything else Keycloak puts there (e.g. an imported
+            # realm mounted at /data/import).
+            - name: keycloak-data
+              mountPath: /opt/keycloak/data/h2
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: keycloak-data
+          persistentVolumeClaim:
+            claimName: keycloak-data

@@ -1,0 +1,12 @@
+---
+apiVersion: v1alpha1
+kind: ExtensionServiceConfig
+name: nut-client
+configFiles:
+  # SHUTDOWNCMD must be /sbin/poweroff on Talos — the NUT default will not work.
+  # "secondary" means this node listens to the Synology (the NUT primary) and
+  # powers itself off; it never commands the UPS.
+  - content: |-
+      MONITOR ${nut_server_host} 1 ${nut_username} ${nut_password} secondary
+      SHUTDOWNCMD "/sbin/poweroff"
+    mountPath: /usr/local/etc/nut/upsmon.conf

@@ -1,0 +1,21 @@
+# Applied to the control plane only.
+#
+# The control plane is schedulable (see cp-scheduling.yaml) because a two-node
+# cluster cannot afford to idle one. The cost is that a runaway pod can starve
+# etcd, which is latency-sensitive — it shows up as random API timeouts and
+# leader elections rather than as an obvious OOM.
+#
+# Reserving resources for the system and kubelet keeps headroom that pods cannot
+# claim. Pair this with resource requests/limits on every workload.
+machine:
+  kubelet:
+    extraConfig:
+      systemReserved:
+        cpu: 300m
+        memory: 768Mi
+      kubeReserved:
+        cpu: 200m
+        memory: 512Mi
+      evictionHard:
+        memory.available: 300Mi
+        nodefs.available: 10%

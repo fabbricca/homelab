@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: minio
+# Shared MinIO S3-compatible object storage.
+# Tenant isolation is done at the bucket + IAM user level:
+#   each platform gets its own bucket and a dedicated IAM user scoped to that bucket.
+# Per-tenant provisioning is done with a one-shot Job + Secret pair added below.
+# None are defined at present.
+resources:
+  - pvc.yaml
+  - secret.yaml
+  - deployment.yaml
+  - service.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux
