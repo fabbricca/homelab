@@ -95,7 +95,19 @@ data "helm_template" "cilium" {
       # a machine config. If the controller does not pick them up on first
       # bootstrap, restarting the Cilium operator and agent is enough; the CNI
       # itself does not depend on them, so bootstrap cannot fail because of this.
-      gatewayAPI = { enabled = true }
+      gatewayAPI = {
+        enabled = true
+
+        # Must be "true" rather than the chart default of "auto".
+        #
+        # "auto" only emits the GatewayClass when .Capabilities.APIVersions
+        # reports gateway.networking.k8s.io/v1/GatewayClass — a check that is
+        # always false here, because helm_template renders offline with no
+        # cluster to query. The resource was silently dropped from the rendered
+        # manifest, so Cilium's controller ran but logged "GatewayClass cilium
+        # not found" indefinitely and no Gateway was ever programmed.
+        gatewayClass = { create = "true" }
+      }
 
       # Required by the Gateway API controller. On by default, set explicitly so
       # the dependency is not lost in a future values cleanup.
