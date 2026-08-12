@@ -17,7 +17,10 @@ data:
 
     image:
       repository: ghcr.io/stefanprodan/podinfo
-      tag: 6.0.3
+      # Tag deliberately unset so the chart's appVersion supplies it and the
+      # image tracks the chart. Pinning 6.0.3 against chart 6.14.1 made the
+      # chart pass flags that old binary does not accept — it printed its usage
+      # and exited, looping in CrashLoopBackOff.
       pullPolicy: IfNotPresent
 
     ui:
