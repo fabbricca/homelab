@@ -1,0 +1,16 @@
+# Lets the nodes resolve keycloak.iberu.me to the Cilium Gateway.
+#
+# kube-apiserver runs as a Talos static pod on the host network, so it uses the
+# host resolver, NOT CoreDNS — a CoreDNS rewrite would not help it. Public DNS
+# resolves keycloak.iberu.me to the Pangolin tunnel, where the Keycloak
+# resource no longer exists, so OIDC discovery would fail with 502.
+#
+# 10.0.0.150 is the Gateway's LoadBalancer address. It terminates TLS with the
+# Let's Encrypt wildcard for *.iberu.me, so the API server validates the
+# certificate against the normal public trust store — no custom CA needed.
+machine:
+  network:
+    extraHostEntries:
+      - ip: 10.0.0.150
+        aliases:
+          - keycloak.iberu.me

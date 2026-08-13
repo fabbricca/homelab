@@ -171,6 +171,10 @@ locals {
           talos_version = var.talos_version
         }),
         file("${path.module}/files/local-path-provisioner-mounts.yaml"),
+        # Applied to every node, not only the control plane: kube-apiserver
+        # needs it, and keeping the nodes identical avoids a resolution
+        # difference that would only surface after a role change.
+        file("${path.module}/files/issuer-host-entry.yaml"),
       ],
       node.second_disk != null ? [
         templatefile("${path.module}/templates/second-disk-mounts.yaml.tmpl", {
