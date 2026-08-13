@@ -1,0 +1,24 @@
+# Backup target, deliberately on a different physical disk from the data.
+#
+# Postgres itself lives on synology-csi-ssd (/volume1, the SSD). Dumps land
+# here on nfs-csi (/volume2, the HDD), so losing either drive does not take
+# both the database and its backups.
+#
+# This is not offsite. Point Synology Hyper Backup at /volume2 and send it to
+# an external USB disk or remote target — a backup that never leaves the NAS
+# does not survive theft, fire, or a mistake made on the NAS itself.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+  namespace: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-csi
+  resources:
+    requests:
+      storage: 20Gi

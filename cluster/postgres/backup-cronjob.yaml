@@ -1,0 +1,99 @@
+# Nightly logical backup of every database in the instance.
+#
+# pg_dumpall rather than per-database pg_dump: it captures roles and grants as
+# well, so a restore does not need the provisioning Jobs re-run first. Keycloak
+# lives in this instance now, so its realms, clients and users are covered here
+# too — that was a large part of the reason for moving it off H2.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: backup
+spec:
+  # 03:15 local. Off-peak, and well clear of any media library scan.
+  schedule: "15 3 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: postgres
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+          containers:
+            - name: pg-dumpall
+              # Same image as the server, so pg_dumpall always matches the
+              # server version. A newer client can read an older server, but
+              # not the reverse — pinning them together avoids that trap.
+              image: pgvector/pgvector:pg17
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+                seccompProfile:
+                  type: RuntimeDefault
+              env:
+                - name: PGHOST
+                  value: postgres.postgres.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: postgres-secret, key: POSTGRES_USER }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: postgres-secret, key: POSTGRES_PASSWORD }
+                - name: RETENTION_DAYS
+                  value: "14"
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  OUT="/backups/pg_dumpall-${STAMP}.sql.gz"
+
+                  until pg_isready -q; do echo "waiting for postgres"; sleep 5; done
+
+                  # Write to a temp name first, then rename. A dump interrupted
+                  # halfway would otherwise look like a valid backup.
+                  pg_dumpall --clean --if-exists | gzip -9 > "${OUT}.partial"
+                  mv "${OUT}.partial" "${OUT}"
+                  echo "wrote ${OUT} ($(stat -c%s "${OUT}") bytes)"
+
+                  # gzip integrity check — catches a truncated or corrupt dump
+                  # now rather than during a restore.
+                  gzip -t "${OUT}" && echo "gzip integrity OK"
+
+                  find /backups -name 'pg_dumpall-*.sql.gz' -type f \
+                    -mtime "+${RETENTION_DAYS}" -print -delete
+                  echo "retained: $(ls -1 /backups/pg_dumpall-*.sql.gz 2>/dev/null | wc -l) dump(s)"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: postgres-backups

@@ -13,6 +13,9 @@ resources:
   - secret.yaml
   - deployment.yaml
   - service.yaml
+  # Nightly logical backups to the HDD (see backup-pvc.yaml):
+  - backup-pvc.yaml
+  - backup-cronjob.yaml
   # Per-platform database provisioning:
   - keycloak-db-secret.yaml
   - keycloak-provision-job.yaml
