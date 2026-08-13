@@ -333,19 +333,17 @@ subnet from anywhere.
 
 ## 11. Roadmap
 
-Delivered: removal of retired platforms and MetalLB; Terraform rebuild on Talos
-v1.13.8 with the extension set above and Terraform-owned Cilium; migration from
-ingress-nginx to Cilium Gateway API, with core charts brought up to date.
+Delivered: Terraform rebuild on Talos v1.13.8 with Terraform-owned Cilium;
+ingress-nginx replaced by Cilium Gateway API; NAS storage split across iSCSI on
+the SSD and NFS on the HDD; Jellyfin transcoding on the Intel iGPU; Keycloak
+moved off H2 onto Postgres; nightly database backups with retention.
 
 Remaining:
 
 | Phase | Work |
 |-------|------|
-| 3 | Storage: Synology CSI (iSCSI) + `csi-driver-nfs` repointed at the NAS |
-| 4 | Apps: Jellyfin with the Intel device plugin, Keycloak, Postgres, MinIO |
 | 5 | Observability: metrics-server, kube-prometheus-stack, Headlamp + OIDC |
 | 6 | KubeVirt + CDI |
-| 7 | Backups |
 | 8 | Network isolation once the Omada ER605 v2 arrives |
 | 9 | RBAC hardening: per-app ServiceAccounts, network policies, PSS labels |
 
