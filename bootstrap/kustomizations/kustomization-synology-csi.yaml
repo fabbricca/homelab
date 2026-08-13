@@ -16,7 +16,9 @@ spec:
     secretRef:
       name: sops-age
   dependsOn:
-    - name: helm-repos
+    # Applies bootstrap/helmrepositories — the name predates it covering more
+    # than the fossorial repo.
+    - name: fossorial-helm-repo
       namespace: flux-system
   healthChecks:
     - apiVersion: apps/v1
