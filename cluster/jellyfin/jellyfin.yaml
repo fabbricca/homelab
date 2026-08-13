@@ -63,9 +63,20 @@ spec:
           requests:
             memory: "768Mi"
             cpu:    "750m"
+            # Device-plugin resources must be equal in requests and limits.
+            gpu.intel.com/i915: "1"
           limits:
             memory: "2Gi"
             cpu:    "1"
+            # QuickSync on the HD Graphics 530 in both i7-6700T nodes. The
+            # Intel device plugin injects /dev/dri into the container, so no
+            # device volumeMount is needed, and renderD128 is mode 0666 on
+            # Talos so UID 1000 reaches it without extra supplementalGroups.
+            #
+            # Skylake QuickSync covers H.264 encode/decode and HEVC 8-bit
+            # decode — no AV1, no HEVC 10-bit encode. Enable VAAPI in
+            # Jellyfin's own playback settings; this only grants the device.
+            gpu.intel.com/i915: "1"
         livenessProbe:
           httpGet:
             path: /health
