@@ -1,0 +1,61 @@
+# Kubernetes dashboard, reachable over Tailscale only.
+#
+# Deliberately NOT registered as a Pangolin resource: the credential behind this
+# UI is cluster-admin, so a misconfiguration is not "someone reads my graphs",
+# it is someone owning the cluster. Jellyfin stays the only public service.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: headlamp
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: headlamp
+      version: "0.44.0"
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+        namespace: flux-system
+      interval: 48h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    replicaCount: 1
+
+    # The chart binds its ServiceAccount to cluster-admin. That token is what
+    # you paste at the login prompt.
+    serviceAccount:
+      create: true
+    clusterRoleBinding:
+      create: true
+      clusterRoleName: cluster-admin
+
+    config:
+      inCluster: true
+      inClusterContextName: homelab
+      # Left false on purpose. Setting it true makes Headlamp use its own
+      # cluster-admin ServiceAccount with no login at all — anyone who reaches
+      # the page is cluster-admin. Tailscale already gates the network; this
+      # keeps a second lock on the door.
+      unsafeUseServiceAccountToken: false
+      sessionTTL: 86400
+      # Off: it would let the UI install and run Helm releases, which is a lot
+      # of authority for a dashboard.
+      enableHelm: false
+
+    resources:
+      requests:
+        cpu: 20m
+        memory: 96Mi
+      limits:
+        memory: 256Mi
+
+    service:
+      type: ClusterIP
+      port: 80
