@@ -1,0 +1,134 @@
+# Sized deliberately small. Both nodes have 8 GB, memory limits already exceed
+# allocatable, and the control plane runs a single-member etcd — an OOM there
+# takes the cluster, not just a dashboard. Everything stateful is therefore
+# pinned off the control plane and given explicit ceilings.
+#
+# Revisit retention and limits once the nodes reach 24 GB.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 30m
+  timeout: 15m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "88.3.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      interval: 48h
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    # Keep the stateful components off the control plane so they cannot starve
+    # etcd. Expressed as "not a control-plane node" rather than a hostname, so
+    # it survives adding or renaming nodes.
+    _nodeAffinity: &offControlPlane
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+
+    # Off deliberately: with no paging destination configured it would only
+    # consume memory. Prometheus still evaluates rules, so alerts are visible
+    # in Grafana.
+    alertmanager:
+      enabled: false
+
+    prometheus:
+      prometheusSpec:
+        affinity: *offControlPlane
+        retention: 7d
+        retentionSize: 8GB
+        # Only scrape ServiceMonitors we opt in, rather than everything in the
+        # cluster — the default pulls in far more series than this box wants.
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 1500Mi
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: synology-csi-ssd
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 10Gi
+
+    grafana:
+      affinity: *offControlPlane
+      defaultDashboardsTimezone: Europe/Rome
+      persistence:
+        enabled: true
+        storageClassName: synology-csi-ssd
+        size: 2Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 384Mi
+      # Reached over Tailscale, not published through the Pangolin tunnel.
+      # Admin surfaces stay private; only Jellyfin is public.
+      grafana.ini:
+        server:
+          root_url: https://grafana.iberu.me
+        analytics:
+          reporting_enabled: false
+          check_for_updates: false
+
+    # Light, and the reason for the whole exercise — per-node CPU, memory,
+    # disk and network.
+    nodeExporter:
+      enabled: true
+    prometheus-node-exporter:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+
+    kube-state-metrics:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 192Mi
+
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+
+    # Talos does not expose these on localhost the way kubeadm does, and
+    # scraping them needs extra wiring. Off for now; the metrics that matter
+    # for capacity planning come from node-exporter and kube-state-metrics.
+    kubeControllerManager:
+      enabled: false
+    kubeScheduler:
+      enabled: false
+    kubeProxy:
+      enabled: false
+    kubeEtcd:
+      enabled: false

@@ -1,0 +1,22 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: monitoring
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/monitoring
+  prune: true
+  # The stack pulls a lot of images and installs CRDs; the default is too tight.
+  timeout: 20m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: fossorial-helm-repo
+      namespace: flux-system
+    # Grafana and Prometheus both claim SSD-backed volumes.
+    - name: synology-csi
+      namespace: flux-system
+    - name: gateway
+      namespace: flux-system

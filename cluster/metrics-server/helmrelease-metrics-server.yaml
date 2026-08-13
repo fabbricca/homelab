@@ -1,0 +1,35 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: metrics-server
+  namespace: kube-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: metrics-server
+      version: "3.13.1"
+      sourceRef:
+        kind: HelmRepository
+        name: metrics-server
+        namespace: flux-system
+      interval: 48h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    args:
+      # Talos issues kubelet serving certificates that metrics-server cannot
+      # verify: the alternative is serverTLSBootstrap plus something to approve
+      # the CSRs, which is more moving parts than this cluster warrants. The
+      # connection stays inside the node network either way.
+      - --kubelet-insecure-tls
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
