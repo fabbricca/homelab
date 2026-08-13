@@ -2,18 +2,19 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: postgres
 # Shared PostgreSQL (pgvector) instance.
-# Tenant isolation is done at the database + user level:
-#   each platform gets its own DB and user provisioned via initdb scripts.
-# The pgvector extension is available cluster-wide so any DB can enable it.
+# Tenant isolation is done at the database + user level: each platform gets its
+# own database and role. The pgvector extension is available to any of them.
 #
-# NOTE: there is currently no initdb ConfigMap. To provision a database for a
-# new platform, add one here plus the matching volume/volumeMount in
-# deployment.yaml — but note initdb scripts only run against an empty data
-# directory, so an existing volume needs the SQL applied by hand.
+# Provisioning is done with a Job + Secret pair rather than initdb scripts,
+# because initdb only runs against an empty data directory — useless once the
+# instance is live. The Jobs are idempotent, so Flux can reapply them freely.
 resources:
   - pvc.yaml
   - secret.yaml
   - deployment.yaml
   - service.yaml
+  # Per-platform database provisioning:
+  - keycloak-db-secret.yaml
+  - keycloak-provision-job.yaml
 commonLabels:
   app.kubernetes.io/managed-by: flux

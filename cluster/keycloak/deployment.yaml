@@ -35,11 +35,15 @@ spec:
           image: quay.io/keycloak/keycloak:26.7.1
           imagePullPolicy: IfNotPresent
           command: ["/opt/keycloak/bin/kc.sh"]
-          # NOTE: start-dev with the embedded H2 database is not a production
-          # configuration. Fine while Keycloak only serves this homelab, but it
-          # should move to "start" backed by the Postgres in cluster/postgres/
-          # before it becomes the SSO provider for the cluster itself.
-          args: ["start-dev"]
+          # Production mode against the Postgres in cluster/postgres/. The KC_DB*
+          # settings arrive via envFrom below; the database and role are created
+          # by the postgres-provision-keycloak Job.
+          #
+          # Runs unoptimized, so Keycloak does its build step on every start — a
+          # slower boot in exchange for not maintaining a custom image.
+          # KC_HOSTNAME_STRICT=false is what makes "start" viable without
+          # pinning a hostname here.
+          args: ["start"]
           ports:
             - name: http
               containerPort: 8080

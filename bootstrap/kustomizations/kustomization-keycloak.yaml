@@ -20,6 +20,10 @@ spec:
       namespace: flux-system
     - name: gateway
       namespace: flux-system
+    # Keycloak stores its data in Postgres now, so the instance and the Job
+    # that creates its role and database have to land first.
+    - name: postgres
+      namespace: flux-system
   healthChecks:
     - apiVersion: apps/v1
       kind: Deployment
