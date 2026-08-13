@@ -3,7 +3,9 @@ kind: StorageClass
 metadata:
   name: nfs-csi
   annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
+    # No longer the default — synology-csi-ssd (iSCSI on the SSD) is. This
+    # class stays for bulk RWX media, which PVCs request by name.
+    storageclass.kubernetes.io/is-default-class: "false"
 provisioner: nfs.csi.k8s.io
 parameters:
   # Synology DS218+. /volume2 is the HDD (bay 1); the SSD is /volume1 because

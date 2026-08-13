@@ -1,0 +1,64 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: synology-csi
+  namespace: kube-system
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: synology-csi
+      version: "0.11.3" # driver v1.3.1
+      sourceRef:
+        kind: HelmRepository
+        name: synology-csi
+        namespace: flux-system
+      interval: 48h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    clientInfoSecret:
+      # Supplied by client-info-secret.yaml (SOPS) rather than rendered from
+      # values, so the DSM password never sits in plaintext in Git.
+      create: false
+      name: synology-csi-client-info
+
+    node:
+      plugin:
+        # Talos keeps the iscsi-tools binaries outside the default PATH the
+        # driver searches. Without this the driver reports "open-iscsi tools not
+        # found on host" and every attach fails. The chart documents this exact
+        # flag for Talos.
+        extraArgs:
+          - --iscsiadm-path=/usr/local/sbin/iscsiadm
+
+    storageClasses:
+      # Databases and object storage: block volumes on the SSD (/volume1).
+      # Named "ssd" so the resulting class reads synology-csi-ssd.
+      ssd:
+        isDefault: true
+        reclaimPolicy: Delete
+        volumeBindingMode: Immediate
+        parameters:
+          protocol: iscsi
+          # /volume1 is the SSD; /volume2 is the HDD, which csi-driver-nfs
+          # already serves for bulk media over NFS.
+          location: /volume1
+          fsType: ext4
+
+      # The chart ships six classes by default and Helm merges maps, so each
+      # unwanted one has to be disabled explicitly or it gets created.
+      iscsi-delete: { disabled: true }
+      iscsi-retain: { disabled: true }
+      nfs-delete: { disabled: true }
+      nfs-retain: { disabled: true }
+      smb-delete: { disabled: true }
+      smb-retain: { disabled: true }
+
+    # The snapshotter StatefulSet and VolumeSnapshotClass are both gated on the
+    # snapshot.storage.k8s.io CRDs, which are not installed. Flux renders against
+    # the live cluster, so they are skipped rather than deployed broken.

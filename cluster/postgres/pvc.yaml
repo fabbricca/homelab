@@ -9,7 +9,11 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: nfs-csi
+  # Block storage on the SSD (/volume1) over iSCSI. Databases and object
+  # storage want real random IOPS, which NFS on the HDD does not give.
+  # NOTE: storageClassName is immutable — changing it needs the PVC
+  # deleted and recreated (see README section 8).
+  storageClassName: synology-csi-ssd
   resources:
     requests:
       storage: 20Gi

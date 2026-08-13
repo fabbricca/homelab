@@ -253,11 +253,29 @@ sops --encrypt --in-place cluster/<path>/<secret>.yaml
 
 ## 7. Storage
 
-* **iSCSI (RWO)** — Synology CSI for Postgres and MinIO. Block storage, which
-  is what databases want; requires the `iscsi-tools` extension.
-* **NFS (RWX)** — `csi-driver-nfs` for Jellyfin media, which needs shared access.
-* **local-path** — node-local scratch, mounted via
-  `infra/files/local-path-provisioner-mounts.yaml`. Used by KubeVirt.
+A Synology DS218+ at `10.0.0.15`, split by workload. Bay 1 is the HDD, bay 2 the
+SSD — but the SSD pool was created first, so **the SSD is `/volume1` and the HDD
+is `/volume2`**, the reverse of the bay numbering.
+
+| Class | Backing | Protocol | For |
+|-------|---------|----------|-----|
+| `synology-csi-ssd` *(default)* | `/volume1` — SSD | iSCSI, RWO | Postgres, MinIO, Keycloak |
+| `nfs-csi` | `/volume2/HDD` | NFS 4.1, RWX | Jellyfin media |
+| local-path | node NVMe | — | KubeVirt scratch |
+
+Databases get block storage on flash; bulk media gets cheap sequential capacity
+with the shared access Jellyfin needs.
+
+Two things that will catch you out:
+
+* **StorageClass `parameters` are immutable.** Repointing one means deleting and
+  recreating it — Flux fails its dry-run otherwise.
+* **A PVC's `storageClassName` is immutable too.** Moving a volume between
+  classes means deleting the PVC and letting Flux recreate it, so scale the
+  workload to zero first or the PVC hangs in `Terminating`.
+
+On Talos the driver needs `--iscsiadm-path=/usr/local/sbin/iscsiadm`; without it
+every attach fails with "open-iscsi tools not found on host".
 
 Replication is not backup. The NAS is the backup target, and its own backups
 should leave the box (USB or offsite).
