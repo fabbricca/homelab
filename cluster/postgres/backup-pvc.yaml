@@ -4,9 +4,44 @@
 # here on nfs-csi (/volume2, the HDD), so losing either drive does not take
 # both the database and its backups.
 #
-# This is not offsite. Point Synology Hyper Backup at /volume2 and send it to
-# an external USB disk or remote target — a backup that never leaves the NAS
-# does not survive theft, fire, or a mistake made on the NAS itself.
+# Statically provisioned so the dumps sit at /volume2/HDD/postgres-backups
+# rather than in a UUID-named directory. A backup you cannot find in File
+# Station is not much of a backup — this way you can browse it, copy dumps off
+# over SMB, and point Hyper Backup at something recognisable.
+#
+# Reclaim policy is Retain: deleting the claim must never delete the dumps.
+#
+# Create the directory on the NAS first:
+#   File Station > HDD > New Folder > "postgres-backups"
+#
+# This is still not offsite. Point Synology Hyper Backup at /volume2 and send
+# it to an external USB disk or a remote target — a backup that never leaves
+# the NAS does not survive theft, fire, or a mistake made on the NAS itself.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-backups
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: backup
+spec:
+  capacity:
+    # Advisory only; NFS enforces no quota.
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: postgres-backups-10.0.0.15
+    volumeAttributes:
+      server: "10.0.0.15"
+      share: "/volume2/HDD/postgres-backups"
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -18,7 +53,8 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: nfs-csi
+  storageClassName: ""
+  volumeName: postgres-backups
   resources:
     requests:
       storage: 20Gi
