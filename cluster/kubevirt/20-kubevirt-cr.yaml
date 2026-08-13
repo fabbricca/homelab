@@ -1,0 +1,26 @@
+# Turns the operator on. Sized for two 8 GB nodes: nothing here reserves memory
+# for guests, but the control-plane components are modest by default and the
+# feature set is kept minimal.
+apiVersion: kubevirt.io/v1
+kind: KubeVirt
+metadata:
+  name: kubevirt
+  namespace: kubevirt
+spec:
+  certificateRotateStrategy: {}
+  configuration:
+    developerConfiguration:
+      featureGates: []
+    # Talos runs containerd with the default runtime; KubeVirt's own
+    # virt-handler DaemonSet needs privileged access, which the namespace
+    # labels below allow.
+  customizeComponents: {}
+  imagePullPolicy: IfNotPresent
+  # One replica each: a 2-node cluster cannot satisfy the default
+  # anti-affinity for two, and HA of the VM control plane is meaningless when
+  # etcd itself is single-member.
+  infra:
+    replicas: 1
+  workloadUpdateStrategy:
+    workloadUpdateMethods:
+      - LiveMigrate

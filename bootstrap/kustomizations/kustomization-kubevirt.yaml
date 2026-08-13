@@ -1,0 +1,19 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kubevirt
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/kubevirt
+  prune: true
+  # Two operators, their CRDs, and the CRs they reconcile.
+  timeout: 20m
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # CDI's scratch space and VM disks both use the iSCSI class.
+    - name: synology-csi
+      namespace: flux-system

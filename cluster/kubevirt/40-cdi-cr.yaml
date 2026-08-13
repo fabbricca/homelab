@@ -1,0 +1,23 @@
+# Containerized Data Importer: pulls VM disk images from URLs, registries or
+# uploads into PVCs. Without it, creating a VM means finding another way to get
+# a disk image into a volume.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: CDI
+metadata:
+  name: cdi
+spec:
+  imagePullPolicy: IfNotPresent
+  infra:
+    nodeSelector:
+      kubernetes.io/os: linux
+  config:
+    # Scratch space for conversions. The SSD class is RWO, which is what CDI
+    # wants, and conversions are IO-heavy.
+    scratchSpaceStorageClass: synology-csi-ssd
+    podResourceRequirements:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
