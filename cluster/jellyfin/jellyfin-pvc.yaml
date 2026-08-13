@@ -9,4 +9,9 @@ spec:
     - ReadWriteMany
   resources:
     requests:
-      storage: 600Gi
+      # /volume2 is a 500 GB WD5000AAKX, ~473 GiB usable. csi-driver-nfs does
+      # not enforce quotas — it just creates a subdirectory — so a request
+      # larger than the volume binds happily and then fails with ENOSPC while
+      # Kubernetes still reports free space. 400Gi keeps the number honest and
+      # leaves headroom on the disk.
+      storage: 400Gi
