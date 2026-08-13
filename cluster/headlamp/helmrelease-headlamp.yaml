@@ -49,6 +49,25 @@ spec:
       # of authority for a dashboard.
       enableHelm: false
 
+    # The chart ships neither of these populated, so the pod is rejected by the
+    # namespace's PodSecurity "restricted" level. Setting them properly is the
+    # right fix — loosening the namespace to accommodate a dashboard that needs
+    # no host access would be the wrong trade.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 100
+      runAsGroup: 101
+      fsGroup: 101
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+
     resources:
       requests:
         cpu: 20m
