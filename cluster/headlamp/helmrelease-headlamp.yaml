@@ -49,6 +49,26 @@ spec:
       # of authority for a dashboard.
       enableHelm: false
 
+      # Log in with a Keycloak account instead of pasting a cluster-admin
+      # ServiceAccount token. Headlamp receives a short-lived id_token and
+      # refreshes it, so there is no long-lived bearer credential to leak.
+      #
+      # secret.create is false: setting clientSecret here would render it in
+      # plaintext into the chart's own Secret, i.e. into Git. The values live in
+      # the SOPS-encrypted secret named "oidc" alongside this file, whose keys
+      # match what the chart's deployment reads.
+      #
+      # Authorisation comes from the group bindings in rbac.yaml; the API server
+      # must also carry the matching oidc-* flags, set in infra/.
+      oidc:
+        secret:
+          create: false
+          name: oidc
+        externalSecret:
+          enabled: true
+          name: oidc
+          hasScopes: true
+
     # The chart ships neither of these populated, so the pod is rejected by the
     # namespace's PodSecurity "restricted" level. Setting them properly is the
     # right fix — loosening the namespace to accommodate a dashboard that needs

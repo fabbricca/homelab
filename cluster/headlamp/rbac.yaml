@@ -1,0 +1,35 @@
+# Maps Keycloak groups to cluster permissions.
+#
+# The API server trusts the "groups" claim in the id_token (see the groups
+# mapper on the "kubernetes" client). These bindings are what turn membership
+# into authority — without them a login succeeds and every API call returns 403.
+#
+# Subjects are prefixed with the OIDC username/group prefix the API server
+# applies. With no --oidc-groups-prefix set, group names arrive verbatim.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oidc-k8s-admins
+subjects:
+  - kind: Group
+    name: k8s-admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oidc-k8s-viewers
+subjects:
+  - kind: Group
+    name: k8s-viewers
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  # Read-only across the cluster, but deliberately not "view": that excludes
+  # secrets, which is the behaviour wanted here.
+  kind: ClusterRole
+  name: view
+  apiGroup: rbac.authorization.k8s.io
