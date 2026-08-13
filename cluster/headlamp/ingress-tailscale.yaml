@@ -1,0 +1,25 @@
+# Exposes Headlamp on the tailnet as headlamp.<tailnet>.ts.net, with a
+# Tailscale-issued TLS certificate. No DNS configuration is needed on any
+# client device — MagicDNS resolves it everywhere Tailscale is connected.
+#
+# This is in addition to the HTTPRoute, which serves the same app on the LAN
+# via the Cilium Gateway. Neither path is public.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: headlamp-tailnet
+  namespace: headlamp
+  annotations:
+    # Without this the name would be namespace-service, i.e.
+    # headlamp-headlamp.<tailnet>.ts.net.
+    tailscale.com/hostname: headlamp
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: headlamp
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - headlamp

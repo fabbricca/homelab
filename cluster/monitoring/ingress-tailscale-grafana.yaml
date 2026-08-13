@@ -1,0 +1,19 @@
+# Grafana on the tailnet as grafana.<tailnet>.ts.net, alongside the LAN
+# HTTPRoute. Not public — Jellyfin remains the only internet-facing service.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-tailnet
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: grafana
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: kube-prometheus-stack-grafana
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - grafana

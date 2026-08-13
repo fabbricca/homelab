@@ -1,0 +1,62 @@
+# Exposes selected services to the tailnet, so private admin interfaces are
+# reachable from anywhere without being published to the internet and without
+# any DNS configuration on client devices.
+#
+# Chosen over running a DNS server on the NAS with a wildcard for iberu.me:
+# that would have made the NAS a single point of failure for name resolution,
+# and created a circular dependency — if the NAS were down, Headlamp and
+# Grafana would be unreachable precisely when needed to diagnose it. It would
+# also have lived outside Git.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+spec:
+  interval: 30m
+  chart:
+    spec:
+      chart: tailscale-operator
+      version: "1.102.2"
+      sourceRef:
+        kind: HelmRepository
+        name: tailscale
+        namespace: flux-system
+      interval: 48h
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Left empty deliberately. Setting these makes the chart render the
+    # operator-oauth secret from values, i.e. the client secret in plaintext in
+    # Git. Empty means the chart skips it and the deployment mounts the
+    # SOPS-encrypted secret of the same name from oauth-secret.yaml.
+    oauth:
+      clientId: ""
+      clientSecret: ""
+
+    operatorConfig:
+      hostname: k8s-operator
+      logging: info
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi
+        limits:
+          memory: 192Mi
+
+    # Registers the "tailscale" IngressClass. An Ingress using it gets a
+    # MagicDNS name and a Tailscale-issued TLS certificate automatically.
+    ingressClass:
+      enabled: true
+      name: tailscale
+
+    # Off: it would let the operator proxy the Kubernetes API over the tailnet.
+    # talosctl and kubeconfig already work over Tailscale, and this widens what
+    # a compromised operator could reach.
+    apiServerProxyConfig:
+      mode: "false"
+      allowImpersonation: "false"
