@@ -1,0 +1,55 @@
+# Statically provisioned so the media lives at a stable, human-readable path.
+#
+# A dynamically provisioned NFS PVC lands in a directory named after its UUID
+# (/volume2/HDD/pvc-23f9e5df-.../), which means adding films involves navigating
+# to a UUID in File Station — and worse, the path changes whenever the PVC is
+# recreated, orphaning the library. This pins it to /volume2/HDD/media instead.
+#
+# Reclaim policy is Retain: deleting the PVC must never delete the library.
+#
+# Create the directory on the NAS before applying:
+#   File Station > HDD > New Folder > "media"
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-media
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/component: media
+spec:
+  capacity:
+    # Advisory only — NFS enforces no quota. The real ceiling is whatever
+    # /volume2 has free (~473 GiB on the 500 GB HDD).
+    storage: 400Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    # Must be unique across the cluster; not a real path.
+    volumeHandle: jellyfin-media-10.0.0.15
+    volumeAttributes:
+      server: "10.0.0.15"
+      share: "/volume2/HDD/media"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-media
+  namespace: media
+  labels:
+    app.kubernetes.io/name: jellyfin
+spec:
+  accessModes:
+    - ReadWriteMany
+  # Empty storageClassName plus volumeName binds this to the PV above and stops
+  # the default class provisioning something new.
+  storageClassName: ""
+  volumeName: jellyfin-media
+  resources:
+    requests:
+      storage: 400Gi

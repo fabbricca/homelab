@@ -1,0 +1,24 @@
+# Jellyfin's config and cache on SSD-backed iSCSI, not NFS.
+#
+# Jellyfin keeps its library index in SQLite, and SQLite over NFS is a known
+# source of locking failures and corruption. Block storage avoids that entirely,
+# and the metadata scans that dominate Jellyfin's IO are random reads — exactly
+# what the SSD is for.
+#
+# RWO is fine: Jellyfin runs a single replica, and must, since multiple writers
+# against one SQLite config is unsafe regardless of storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-config
+  namespace: media
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/component: config
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 20Gi

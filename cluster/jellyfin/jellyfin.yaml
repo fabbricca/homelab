@@ -36,15 +36,19 @@ spec:
         ports:
         - containerPort: 8096
         volumeMounts:
-        - name: jellyfin-pvc
+        # Config and cache on SSD-backed iSCSI: the library index is SQLite,
+        # which does not belong on NFS.
+        - name: config
           mountPath: /config
-          subPath: jellyfin/config
-        - name: jellyfin-pvc
+          subPath: config
+        - name: config
           mountPath: /cache
-          subPath: jellyfin/cache
-        - name: jellyfin-pvc
+          subPath: cache
+        # Media on NFS at a fixed, browsable path (/volume2/HDD/media) rather
+        # than inside a UUID-named directory that moves when the PVC is
+        # recreated.
+        - name: media
           mountPath: /media
-          subPath: jellyfin/media
         - name: tmp-volume
           mountPath: /tmp
         securityContext:
@@ -85,8 +89,11 @@ spec:
           periodSeconds: 20
           timeoutSeconds: 5
       volumes:
-      - name: jellyfin-pvc
+      - name: config
         persistentVolumeClaim:
-          claimName: jellyfin-pvc
+          claimName: jellyfin-config
+      - name: media
+        persistentVolumeClaim:
+          claimName: jellyfin-media
       - name: tmp-volume
         emptyDir: {}
