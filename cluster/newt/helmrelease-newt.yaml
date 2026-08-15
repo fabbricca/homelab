@@ -16,12 +16,54 @@ spec:
         name: fossorial
         namespace: flux-system
   values:
+    global:
+      image:
+        # Chart 1.5.0 ships appVersion 1.12.5, but the Pangolin server this
+        # tunnel connects to reports version 1.16.2. On 1.12.5 the WireGuard
+        # handshake never completed:
+        #
+        #   SendMessageInterval timed out after 16 attempts for message type:
+        #   newt/wg/get-config
+        #
+        # newt fell back to relaying over the websocket, which passes small
+        # responses but stalls anything larger than roughly one packet — a
+        # range request returned 206 for bytes 0-199 and timed out for 0-999.
+        # Public services therefore half-worked: the Jellyfin API answered
+        # while /web/ hung, and Keycloak returned 504, all while every service
+        # answered 200 instantly inside the cluster.
+        #
+        # Restarting the deployment cleared it for a few minutes only. Pinned
+        # ahead of the chart's appVersion deliberately; drop this override once
+        # a chart ships 1.15.0 or newer.
+        tag: "1.15.0"
+
     newtInstances:
       - name: main-tunnel
         enabled: true
         auth:
           existingSecretName: newt-credentials
           # Keys match the default: PANGOLIN_ENDPOINT, NEWT_ID, NEWT_SECRET
+
+        # The chart runs newt with readOnlyRootFilesystem: true as user 65534,
+        # and newt resolves its config directory to /.config because HOME is
+        # unset. Every start therefore logged:
+        #
+        #   Failed to create config directory: mkdir /.config: read-only file system
+        #   Failed to save config: open /.config/newt-client/config.json: no such file
+        #
+        # Pointing HOME at a writable emptyDir lets newt cache the config it
+        # fetches from Pangolin instead of refetching on every restart. The
+        # volume is deliberately ephemeral: the config is server-authoritative,
+        # so there is nothing here worth persisting across a reschedule.
+        extraEnv:
+          HOME: /home/newt
+        extraVolumes:
+          - name: newt-home
+            emptyDir: {}
+        extraVolumeMounts:
+          - name: newt-home
+            mountPath: /home/newt
+
         upstream:
           # Cilium creates this LoadBalancer Service for the Gateway named
           # "main" in the gateway namespace. Pangolin terminates TLS at the
