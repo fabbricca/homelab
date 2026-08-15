@@ -57,6 +57,19 @@ spec:
         # so there is nothing here worth persisting across a reschedule.
         extraEnv:
           HOME: /home/newt
+
+          # newt defaults to 1280, which puts the outer WireGuard datagram at
+          # roughly 1340 bytes. Measured from the Pangolin VPS itself (so with
+          # no client-side path involved), responses stalled the moment they
+          # needed a full-size segment: a range request for bytes 0-199
+          # returned 206 in 0.12s while 0-999 timed out, and gerbil's wg0
+          # counters showed the transfer starting (+2212 B) and then dying.
+          #
+          # Nothing can discover the real limit automatically here: Oracle
+          # filters ICMP on the VPS, so Path MTU Discovery is structurally
+          # broken and the kernel still believes pmtu is 9000 (ens3 is a jumbo
+          # frame interface). The tunnel therefore has to be told.
+          MTU: "1100"
         extraVolumes:
           - name: newt-home
             emptyDir: {}
