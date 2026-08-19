@@ -1,0 +1,83 @@
+# Everything the application reads that is not a secret.
+#
+# This is the docker-compose.sandbox.yml overlay expressed as a ConfigMap. The
+# point of that overlay is that Poseidon itself is unchanged: only the outbound
+# base URLs move, so the clients, retries, pagination and parsing under test are
+# the real ones. The same holds here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: poseidon-config
+  namespace: poseidon
+data:
+  # ── core ──
+  # NOT "development": poseidon.api.security.set_session_cookie derives the
+  # cookie's Secure flag from this value, and the session cookie travels over
+  # the public internet.
+  POSEIDON_ENV: "production"
+  POSEIDON_LOG_LEVEL: "INFO"
+  PUBLIC_BASE_URL: "https://poseidon.iberu.me"
+
+  REDIS_URL: "redis://redis:6379/0"
+
+  # ── object storage ──
+  # Public and internal endpoints are identical on purpose; see minio.yaml for
+  # why the store is not published.
+  S3_ENDPOINT_URL: "http://minio:9000"
+  S3_PUBLIC_ENDPOINT_URL: "http://minio:9000"
+  S3_BUCKET_ADS: "poseidon-ads"
+  S3_BUCKET_GENERATED: "poseidon-generated"
+  S3_REGION: "us-east-1"
+
+  # ── vendor APIs -> mockapi ──
+  # Meta Ad Library, Shopify, Reddit, Trustpilot, GA4, HubSpot and BigQuery all
+  # answer from the sandbox. No request in this list leaves the cluster.
+  META_API_VERSION: "v21.0"
+  META_GRAPH_BASE: "http://mockapi:8080"
+  SHOPIFY_BASE_OVERRIDE: "http://mockapi:8080"
+  REDDIT_OAUTH_BASE: "http://mockapi:8080"
+  REDDIT_TOKEN_URL: "http://mockapi:8080/api/v1/access_token"
+  TRUSTPILOT_BASE: "http://mockapi:8080/trustpilot/v1"
+  GA4_BASE: "http://mockapi:8080/ga4/v1beta"
+  HUBSPOT_BASE: "http://mockapi:8080/hubspot"
+  BIGQUERY_BASE: "http://mockapi:8080/bigquery/v2"
+
+  # Placeholders the mocks accept. Poseidon requires them to be present; they
+  # are not credentials for anything.
+  REDDIT_CLIENT_ID: "sandbox-client"
+  REDDIT_CLIENT_SECRET: "sandbox-secret"
+  REDDIT_USER_AGENT: "poseidon/1.0"
+
+  # ── model providers ──
+  # The one deliberate exception to "everything is mocked". The sandbox LLM
+  # gateway parks each call for a human operator to answer by hand, which has no
+  # meaning on an unattended host — a visitor's run would sit for 30 minutes and
+  # then fail with 504. Anthropic therefore points at the live API, which
+  # docker-compose.sandbox.yml explicitly supports.
+  ANTHROPIC_BASE: "https://api.anthropic.com"
+
+  LLM_TIER_BULK: "anthropic:claude-haiku-4-5-20251001"
+  LLM_TIER_REASONING: "anthropic:claude-sonnet-5"
+  LLM_TIER_VISION: "anthropic:claude-haiku-4-5-20251001"
+  # Image and video are unreachable: no OPENAI_API_KEY and no FAL_KEY are set,
+  # and Brand.automation_enabled defaults to false, so generate_asset is never
+  # entered. Left declared so the tier table is complete and the cost ledger's
+  # pricing lookups do not fall through.
+  LLM_TIER_IMAGE: "openai:gpt-image-1"
+  LLM_TIER_VIDEO: "fal:veo-3"
+
+  # ── cost guardrails ──
+  # Signup is open on this instance and every visitor's run spends real money,
+  # so these are the sandbox console's tight values, not the compose defaults of
+  # 2000/10000. 100c per run and 300c per brand per day is the whole brake.
+  MAX_COST_CENTS_PER_RUN: "100"
+  MAX_COST_CENTS_PER_BRAND_PER_DAY: "300"
+  # 5 rather than 30. Two stages call the model once per ad, so this is the
+  # single biggest lever on what a run costs — and the two numbers are coupled:
+  # tests/test_cost_controls.py asserts that a pessimistic run
+  # (max_ads_per_niche_batch * 3 ads, with low effort saving far less than
+  # expected) still fits inside MAX_COST_CENTS_PER_RUN. At this tier routing the
+  # bound is 89.6c for 5, and 101.1c for 6 — which fails. Raising either number
+  # without re-running that test buys a cap the pipeline can trip over halfway
+  # through a run, which is worse than a smaller batch.
+  MAX_ADS_PER_NICHE_BATCH: "5"

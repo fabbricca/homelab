@@ -1,0 +1,79 @@
+# Celery broker and cache. Deliberately ephemeral: everything Poseidon cares
+# about surviving a restart is in Postgres — I1 says a run that dies at stage 7
+# resumes at stage 7, and that resumption reads the database, not the queue. A
+# lost queue costs at most the in-flight task, which the engine re-enqueues.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: poseidon
+spec:
+  selector:
+    app.kubernetes.io/name: poseidon
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: poseidon
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"
+    checkov.io/skip2: "CKV_K8S_9"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: redis
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2  # 7-alpine
+          imagePullPolicy: IfNotPresent
+          # No --appendonly: the compose file persists the queue to a volume,
+          # which matters on a laptop that gets closed. Here the broker is
+          # rebuilt from the database instead, so persistence would only buy a
+          # write amplification on the SSD.
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { memory: "48Mi", cpu: "20m" }
+            limits:   { memory: "256Mi", cpu: "250m" }
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: data
+          emptyDir: {}

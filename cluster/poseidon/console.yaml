@@ -1,0 +1,83 @@
+# Operator console. Carries the backend code, the test suite, the eval harness
+# and the sandbox tools, so seeding, testing and driving a run need nothing
+# installed anywhere:
+#
+#   kubectl -n poseidon exec deploy/console -- python -m poseidon.core.seed --reset
+#   kubectl -n poseidon exec deploy/console -- python -m pytest tests/ -q
+#   kubectl -n poseidon exec deploy/console -- python -m poseidon.evals.t7.harness
+#   kubectl -n poseidon exec deploy/console -- tools/sandbox-brand
+#   kubectl -n poseidon exec deploy/console -- tools/sandbox-status
+#
+# It idles at ~40 MiB. Its environment comes from the same ConfigMap and Secret
+# as the worker's, deliberately: a cost estimate or an eval run from a container
+# configured differently from the one doing the work describes nothing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console
+  namespace: poseidon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: console
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: console
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: console
+          image: fabbricca/poseidon-console@sha256:d2d1fb2c76eb5b4b1e3e8ca2501e331d017cc93efbb363d79818b2562db70715  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          envFrom:
+            - configMapRef: { name: poseidon-config }
+            - secretRef:     { name: poseidon-app }
+          env:
+            # Where tools/sandbox-brand and tools/sandbox-status point. The
+            # tools go through the BFF exactly as a browser does, so they
+            # exercise the proxy too, not just the API.
+            #
+            # The public URL, not http://web:3000 as under compose. POSEIDON_ENV
+            # is "production" here, which makes the session cookie Secure, and
+            # curl will not send a Secure cookie over plain HTTP — every request
+            # after login comes back "not authenticated". So these tools need
+            # the Pangolin resource for poseidon.iberu.me to exist.
+            #
+            # To drive them before it does, or from inside the cluster without
+            # leaving it, resolve the hostname to the Gateway yourself:
+            #
+            #   GWIP=$(kubectl -n gateway get svc cilium-gateway-main \
+            #            -o jsonpath='{.spec.clusterIP}')
+            #   kubectl -n poseidon exec deploy/console -- \
+            #     curl -sk --resolve poseidon.iberu.me:443:$GWIP ...
+            #
+            # The wildcard certificate covers the name, so only the resolution
+            # is missing.
+            - name: POSEIDON_BASE
+              value: https://poseidon.iberu.me/api/proxy
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            # The tools keep a cookie jar and the current brand id here; see the
+            # POSEIDON_COOKIES / POSEIDON_BRANDFILE defaults baked into the image.
+            - { name: state, mountPath: /state }
+          resources:
+            requests: { memory: "64Mi", cpu: "10m" }
+            limits:   { memory: "768Mi", cpu: "1" }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: state
+          emptyDir: {}

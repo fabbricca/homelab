@@ -1,0 +1,29 @@
+# Attaches to the shared Gateway in cluster/gateway/. Pangolin terminates TLS at
+# the edge and newt forwards plain HTTP to the Gateway's :80 listener, so the
+# hostname here is what makes the Pangolin resource for poseidon.iberu.me land
+# on this application. The :443 listener serves the same route directly from the
+# LAN using the wildcard certificate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: poseidon
+  namespace: poseidon
+  labels:
+    app.kubernetes.io/name: poseidon
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - poseidon.iberu.me
+  rules:
+    - backendRefs:
+        - name: web
+          port: 3000
+      timeouts:
+        # A pipeline run is enqueued, not awaited, so no browser request blocks
+        # on the model. But brand setup verifies credentials synchronously over
+        # HTTP to the mock vendors, and the 15s default is uncomfortably close
+        # to that on a cold worker. 120s leaves room without hiding a hang.
+        request: 120s
+        backendRequest: 120s

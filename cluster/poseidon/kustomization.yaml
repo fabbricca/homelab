@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: poseidon
+# Poseidon — competitor ad intelligence and creative generation.
+# Source: ../../../poseidon (built and pushed to docker.io/fabbricca/poseidon-*).
+#
+# This is the repository's sandbox configuration
+# (docker-compose.yml + docker-compose.sandbox.yml), not its production one:
+# every vendor API — Meta Ad Library, Shopify, Reddit, Trustpilot, GA4, HubSpot,
+# BigQuery — is answered by the `mockapi` service on the internal network. The
+# application code is unchanged; only the base URLs in poseidon-config move, so
+# the clients, retries, pagination and parsing exercised here are the real ones.
+#
+# The single exception is Anthropic, which points at the live API. The sandbox's
+# LLM gateway parks every model call for a human to answer by hand, which cannot
+# work on an unattended public host. See the comment in config.yaml.
+#
+# Postgres, Redis and MinIO are namespace-local rather than the shared instances
+# in cluster/postgres/ and cluster/minio/, so the whole application is one
+# namespace to delete. See the note at the top of postgres.yaml for the cost.
+resources:
+  - secret.yaml
+  - config.yaml
+  # Datastores first — the application's initContainers block on them anyway,
+  # but the ordering makes a cold start read the way it happens.
+  - postgres.yaml
+  - redis.yaml
+  - minio.yaml
+  # Mock vendor APIs.
+  - mockapi.yaml
+  # Application. api carries the migrate initContainer that worker and beat wait on.
+  - api.yaml
+  - worker.yaml
+  - web.yaml
+  - console.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

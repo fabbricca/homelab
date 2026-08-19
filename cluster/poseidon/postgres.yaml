@@ -1,0 +1,113 @@
+# Poseidon's own Postgres, deliberately not the shared instance in
+# cluster/postgres/. Poseidon owns 39 tables and its Alembic migrations expect
+# to own the `public` schema; keeping it separate means a `docker compose down
+# -v` equivalent here cannot touch Keycloak's data, and the whole application
+# can be deleted by removing one namespace.
+#
+# The cost is that this database is outside the nightly backup CronJob in
+# cluster/postgres/. That is acceptable while the data is demo data — but it is
+# the first thing to change if it stops being demo data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: poseidon-postgres-data
+  namespace: poseidon
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: poseidon
+spec:
+  selector:
+    app.kubernetes.io/name: poseidon
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: poseidon
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"    # postgres has no HTTP endpoint to probe
+    checkov.io/skip2: "CKV_K8S_9"
+    checkov.io/skip3: "CKV_K8S_22"   # the entrypoint writes to the root fs
+spec:
+  replicas: 1
+  # RWO iSCSI volume: the replacement pod cannot attach while the incumbent
+  # holds it, and a rolling update deadlocks. Same reasoning as jellyfin.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: postgres
+    spec:
+      automountServiceAccountToken: false
+      # The postgres entrypoint normally starts as root and gosu's down to uid
+      # 999. Starting *as* 999 skips that branch entirely, which satisfies
+      # runAsNonRoot — but only if the data directory is already writable, hence
+      # fsGroup: the CSI driver chowns the mount to it on attach.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: postgres
+          # Matches the shared instance's image, so an eventual move onto it is
+          # a dump and restore between identical server versions.
+          image: pgvector/pgvector:pg17
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: poseidon-postgres
+          env:
+            # The image refuses to initialise into a directory that already has
+            # lost+found in it, which every freshly formatted iSCSI LUN does.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Not readOnlyRootFilesystem: the entrypoint writes to /var/run/postgresql
+            # and to /tmp for the initdb bootstrap socket.
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: { memory: "192Mi", cpu: "50m" }
+            limits:   { memory: "768Mi", cpu: "500m" }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "poseidon", "-d", "poseidon"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "poseidon", "-d", "poseidon"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: poseidon-postgres-data

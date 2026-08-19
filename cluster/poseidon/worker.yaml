@@ -1,0 +1,198 @@
+# Celery worker (the pipeline engine) and Celery beat (daily competitor refresh,
+# nightly measurement, stalled-run reaper).
+#
+# Both wait on the api Deployment's migrate initContainer rather than running
+# Alembic themselves: concurrent `alembic upgrade head` against one database is
+# a race, and the loser corrupts the version table. The initContainer below only
+# reads.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: poseidon
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      initContainers:
+        - name: wait-for-schema
+          image: fabbricca/poseidon-backend@sha256:23636fedfb90fc113296ed11124a9c9e447e3e53818643c35c6f8b82fbfe68d5  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |
+              import sys, time
+              from sqlalchemy import create_engine, text
+              from poseidon.core.config import settings
+              e = create_engine(settings.database_url_sync, pool_pre_ping=True)
+              for _ in range(150):          # 5 minutes
+                  try:
+                      with e.connect() as c:
+                          if c.execute(text("select to_regclass('public.alembic_version')")).scalar():
+                              print("schema present"); sys.exit(0)
+                  except Exception as exc:
+                      print(f"waiting: {str(exc)[:120]}")
+                  time.sleep(2)
+              sys.exit("migrations did not land within 300s")
+          envFrom:
+            - configMapRef: { name: poseidon-config }
+            - secretRef:     { name: poseidon-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { memory: "96Mi", cpu: "20m" }
+            limits:   { memory: "384Mi", cpu: "500m" }
+      containers:
+        - name: worker
+          image: fabbricca/poseidon-backend@sha256:23636fedfb90fc113296ed11124a9c9e447e3e53818643c35c6f8b82fbfe68d5  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          # Concurrency 2, not the compose file's 4. Two i7-6700T nodes also run
+          # Jellyfin, Keycloak, KubeVirt and the monitoring stack; four
+          # prefetching workers on this hardware buys queue depth nobody is
+          # waiting on and costs memory that is genuinely scarce.
+          command:
+            - celery
+            - -A
+            - poseidon.core.celery_app.celery_app
+            - worker
+            - --loglevel=INFO
+            - --concurrency=2
+            - -Q
+            - default,ingest,llm,media
+          envFrom:
+            - configMapRef: { name: poseidon-config }
+            - secretRef:     { name: poseidon-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { memory: "384Mi", cpu: "100m" }
+            limits:   { memory: "1Gi", cpu: "1500m" }
+          livenessProbe:
+            exec:
+              # Wrapped in a shell because the probe needs $(hostname): the
+              # kubelet substitutes $(VAR) only for declared env vars, and an
+              # exec probe has no shell of its own.
+              command:
+                - sh
+                - -c
+                - celery -A poseidon.core.celery_app.celery_app inspect ping -d "celery@$(hostname)"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beat
+  namespace: poseidon
+spec:
+  replicas: 1
+  # Two beats mean every periodic task fires twice. Recreate is the cheap way
+  # to guarantee there is never a moment with both.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: beat
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      initContainers:
+        - name: wait-for-schema
+          image: fabbricca/poseidon-backend@sha256:23636fedfb90fc113296ed11124a9c9e447e3e53818643c35c6f8b82fbfe68d5  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |
+              import sys, time
+              from sqlalchemy import create_engine, text
+              from poseidon.core.config import settings
+              e = create_engine(settings.database_url_sync, pool_pre_ping=True)
+              for _ in range(150):          # 5 minutes
+                  try:
+                      with e.connect() as c:
+                          if c.execute(text("select to_regclass('public.alembic_version')")).scalar():
+                              print("schema present"); sys.exit(0)
+                  except Exception as exc:
+                      print(f"waiting: {str(exc)[:120]}")
+                  time.sleep(2)
+              sys.exit("migrations did not land within 300s")
+          envFrom:
+            - configMapRef: { name: poseidon-config }
+            - secretRef:     { name: poseidon-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { memory: "96Mi", cpu: "20m" }
+            limits:   { memory: "384Mi", cpu: "500m" }
+      containers:
+        - name: beat
+          image: fabbricca/poseidon-backend@sha256:23636fedfb90fc113296ed11124a9c9e447e3e53818643c35c6f8b82fbfe68d5  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          # The schedule file lands in /tmp, which is the emptyDir below — the
+          # root filesystem is read-only and beat cannot start without a
+          # writable path for it. Losing the schedule on restart is harmless:
+          # it is a last-run bookkeeping file, not state.
+          command:
+            - celery
+            - -A
+            - poseidon.core.celery_app.celery_app
+            - beat
+            - --loglevel=INFO
+            - --schedule=/tmp/celerybeat-schedule
+          envFrom:
+            - configMapRef: { name: poseidon-config }
+            - secretRef:     { name: poseidon-app }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { memory: "96Mi", cpu: "20m" }
+            limits:   { memory: "384Mi", cpu: "500m" }
+      volumes:
+        - name: tmp
+          emptyDir: {}

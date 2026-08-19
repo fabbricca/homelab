@@ -1,0 +1,73 @@
+# The sandbox vendor APIs: synthetic-but-coherent Meta Ad Library, Shopify,
+# Reddit and Trustpilot responses, served over real HTTP on the internal
+# network. This is the service that makes the deployment safe to expose — no
+# visitor's brand setup can reach a real vendor, and no real credential is ever
+# needed to drive the pipeline end to end.
+#
+# Its world is generated in-process and is stateless across restarts, so it
+# needs no volume and no probe beyond its own health endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mockapi
+  namespace: poseidon
+spec:
+  selector:
+    app.kubernetes.io/name: poseidon
+    app.kubernetes.io/component: mockapi
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mockapi
+  namespace: poseidon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: mockapi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: mockapi
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: mockapi
+          image: fabbricca/poseidon-sandbox@sha256:22a27b83d33817bd5b106ebaffbdac4b5cc715d0621cd49cc1fbf8dc44c199d9  # 1.0.1
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "mockapi.main:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { memory: "96Mi", cpu: "20m" }
+            limits:   { memory: "384Mi", cpu: "500m" }
+          readinessProbe:
+            httpGet: { path: /_sandbox/health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /_sandbox/health, port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: {}

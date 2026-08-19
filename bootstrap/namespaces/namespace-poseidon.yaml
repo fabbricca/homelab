@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: poseidon
+  labels:
+    app.kubernetes.io/name: poseidon
+    # Baseline rather than restricted, for the same reason the media namespace
+    # settles for it: the Postgres and MinIO images start as root and drop
+    # privileges in their own entrypoints, which `restricted` rejects outright.
+    # Poseidon's own containers (api, worker, beat, web, mockapi, console) do
+    # satisfy `restricted` and are configured as if it were enforced.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest

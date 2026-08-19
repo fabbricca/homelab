@@ -1,0 +1,115 @@
+# Poseidon's object store: competitor creative fetched from the Ad Library
+# (`poseidon-ads`) and anything T9/T10 generate (`poseidon-generated`). The
+# buckets are created by the migrate initContainer on the api Deployment, via
+# poseidon.core.storage.ensure_buckets.
+#
+# NOT routed through the Gateway, unlike the shared MinIO in cluster/minio/.
+# presigned_url() rewrites the endpoint host in the URL but the signature was
+# computed over the internal host, so a publicly reachable copy would answer
+# every presigned request with 403 SignatureDoesNotMatch. Publishing it would
+# mean signing against poseidon.iberu.me, which would in turn push the worker's
+# own uploads out through the Pangolin tunnel and back.
+#
+# The practical consequence: generated-asset URLs do not resolve in a browser.
+# Nothing on this deployment produces one — Brand.automation_enabled defaults to
+# false and no image/video provider key is configured — so the path is unused.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: poseidon-minio-data
+  namespace: poseidon
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: poseidon
+spec:
+  selector:
+    app.kubernetes.io/name: poseidon
+    app.kubernetes.io/component: minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: poseidon
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"
+    checkov.io/skip2: "CKV_K8S_9"
+    checkov.io/skip3: "CKV_K8S_22"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: poseidon
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: poseidon
+        app.kubernetes.io/component: minio
+    spec:
+      automountServiceAccountToken: false
+      # MinIO's image defaults to root but needs nothing from it; fsGroup hands
+      # it a writable /data on attach.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          # The shared MinIO in cluster/minio/ tracks :latest. Pinned by digest
+          # here so an upstream release cannot change the object store under a
+          # running application without a commit.
+          image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          imagePullPolicy: IfNotPresent
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          envFrom:
+            - secretRef:
+                name: poseidon-minio
+          securityContext:
+            allowPrivilegeEscalation: false
+            # MinIO writes certificate and config state under $HOME (/), so the
+            # root filesystem cannot be read-only.
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { memory: "192Mi", cpu: "50m" }
+            limits:   { memory: "640Mi", cpu: "500m" }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: poseidon-minio-data

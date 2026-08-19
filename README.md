@@ -226,6 +226,26 @@ Cilium operator and agent — ordering between `extraManifests` and the Cilium
 `inlineManifest` is not guaranteed. The CNI itself does not depend on these
 CRDs, so bootstrap cannot fail because of them.
 
+This has bitten once, and the failure is quiet enough to be worth describing.
+The operator logged, at startup only:
+
+```
+level=error msg="Required GatewayAPI resources are not found, ..."
+  error="Get \"https://localhost:7445/apis/.../gatewayclasses...\": EOF"
+```
+
+KubePrism was not answering yet, so the controller never initialised — and it
+does not retry. Everything already routed kept working, because the Envoy
+configuration for existing routes had been programmed by an earlier operator
+instance and outlived it. Only *new* `HTTPRoute`s were affected: they stayed
+with `status: null`, the Gateway's `attachedRoutes` did not increase, and
+requests for the new hostname returned 404 from Envoy. Nothing anywhere reported
+an error.
+
+So: an `HTTPRoute` that never gets a status is not a broken route — it is a
+Gateway controller that is not running. `kubectl -n kube-system rollout restart
+deploy/cilium-operator` fixes it, and no existing route drops while it happens.
+
 **Migration caveat:** Gateway API has no portable equivalent of nginx's
 `proxy-body-size`. MinIO previously allowed 500 MB request bodies; if large S3
 uploads start failing, that limit is now a data-plane (Envoy) concern.
@@ -300,6 +320,7 @@ Two separate paths, deliberately:
 | Surface | Exposure | Path |
 |---------|----------|------|
 | Jellyfin | Public | newt → Pangolin tunnel → Cilium Gateway |
+| Poseidon | Public | newt → Pangolin tunnel → Cilium Gateway |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
 
 Admin interfaces are never internet-facing. The tunnel is outbound-only, so it
@@ -333,7 +354,7 @@ subnet from anywhere.
 
 ## 11. Roadmap
 
-Delivered: Terraform rebuild on Talos v1.13.8 with Terraform-owned Cilium;
+Delivered: Poseidon on `poseidon.iberu.me`; Terraform rebuild on Talos v1.13.8 with Terraform-owned Cilium;
 ingress-nginx replaced by Cilium Gateway API; NAS storage split across iSCSI on
 the SSD and NFS on the HDD; Jellyfin transcoding on the Intel iGPU; Keycloak
 moved off H2 onto Postgres; nightly database backups with retention.
