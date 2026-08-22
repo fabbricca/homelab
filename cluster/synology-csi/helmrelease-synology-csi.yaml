@@ -69,6 +69,28 @@ spec:
           protocol: iscsi
           location: /volume1
           fsType: ext4
+          # Passed straight through to mkfs.ext4 by the node plugin.
+          #
+          # Without it, the first mount of the 250 GiB Immich library LUN took
+          # fourteen minutes and failed six times on the way. mke2fs discards
+          # the whole device before writing, and 250 GiB of BLKDISCARD over
+          # iSCSI to a Celeron-class NAS is far slower than the CSI gRPC
+          # deadline. Each timeout left the previous mke2fs still holding the
+          # device, so every retry died on:
+          #
+          #   ...lun-1 is apparently in use by the system;
+          #   will not make a filesystem here!
+          #
+          # which reads like a locking bug and is really just a format that has
+          # not finished yet. nodiscard skips the pass entirely; the lazy inits
+          # move inode-table and journal zeroing into the background, where the
+          # kernel does them while the volume is already usable.
+          #
+          # Only on this class. The default `ssd` class provisions volumes an
+          # order of magnitude smaller, all of which format in seconds, and its
+          # parameters are immutable — changing them means deleting a class
+          # that eight bound volumes reference, for no gain.
+          formatOptions: -E nodiscard,lazy_itable_init=1,lazy_journal_init=1
 
       # The chart ships six classes by default and Helm merges maps, so each
       # unwanted one has to be disabled explicitly or it gets created.
