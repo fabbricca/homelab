@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: immich
+# Immich v3.1.0 — self-hosted photo and video backup, the Google Photos
+# replacement listed at the bottom of the README's roadmap.
+#
+# Translated from the upstream docker-compose.yml for v3.1.0 rather than taken
+# from the community Helm chart: the chart does not ship a database, which is
+# the part of Immich with the most specific requirements (VectorChord at a
+# version the server validates on connect), so most of the work would remain
+# either way. Four workloads, mirroring the four compose services.
+#
+# Everything is namespace-local — Postgres, Valkey, the library volume, the
+# model cache — so the whole application is one namespace to delete, on the
+# same reasoning as poseidon. The difference is the cost of doing it: deleting
+# the poseidon namespace loses demo data. Deleting this one loses photographs,
+# which is why the library PVC is on a Retain storage class and why
+# backup-cronjob.yaml exists.
+resources:
+  - secret.yaml
+  # Datastores first — the server blocks on both anyway, but the ordering makes
+  # a cold start read the way it happens.
+  - postgres.yaml
+  - redis.yaml
+  # The library volume, claimed before the server that mounts it.
+  - library-pvc.yaml
+  # Application.
+  - machine-learning.yaml
+  - server.yaml
+  - httproute.yaml
+  # Nightly pg_dumpall onto the HDD, so the database and its backups are never
+  # on the same disk.
+  - backup-cronjob.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

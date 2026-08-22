@@ -1,0 +1,94 @@
+# Valkey, the queue Immich's background jobs run through (BullMQ).
+#
+# Deliberately ephemeral, following upstream: the compose file gives this
+# container no volume either. Everything Immich must not lose is in Postgres
+# and on the library volume — an upload is written to disk and recorded in the
+# database before any job is enqueued. Losing the queue therefore costs
+# derived work only: some assets may be left without thumbnails or without
+# having been through machine learning, which Administration > Job Queues
+# rebuilds by running the "Missing" variant of the affected job.
+#
+# Valkey rather than Redis because that is what Immich ships and tests against.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: redis
+spec:
+  selector:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: immich
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"
+    checkov.io/skip2: "CKV_K8S_9"
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: immich
+        app.kubernetes.io/component: redis
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: redis
+          # Digest taken from the v3.1.0 docker-compose.yml, so this is the
+          # build Immich tests against.
+          image: docker.io/valkey/valkey:9@sha256:8e8d64b405ce18f41b8e5ee20aa4687a8ed0022d1298f2ce31cdcf3a76e09411
+          imagePullPolicy: IfNotPresent
+          # Persistence off, matching the emptyDir above it: writing an AOF
+          # would only add SSD churn for state that is rebuilt from Postgres.
+          args: ["valkey-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests: { memory: "48Mi", cpu: "20m" }
+            limits:   { memory: "256Mi", cpu: "250m" }
+          readinessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            exec: { command: ["valkey-cli", "ping"] }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: data
+          emptyDir: {}

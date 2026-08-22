@@ -1,0 +1,43 @@
+# The photo and video library — originals, thumbnails, transcodes, profile
+# images and Immich's own database dumps, all under /data in the server
+# container. This is the reason the whole application exists, and the one
+# volume in this cluster holding data that exists nowhere else.
+#
+# On the SSD (/volume1, iSCSI) rather than the HDD that serves Jellyfin's
+# media over NFS, for two reasons. Immich's access pattern is not Jellyfin's:
+# opening the timeline fans out into hundreds of small random reads for
+# thumbnails, which is the worst case for a 5400 rpm 3.5" disk and the best
+# case for flash. And /volume1 is the larger of the two volumes — 884 GiB
+# against 437 GiB — with room to grow into.
+#
+# Size: 250Gi. The Synology CSI driver creates thick LUNs, so this is claimed
+# on the NAS the moment the PVC binds, not as it fills. /volume1 had 759 GiB
+# free when this was written, so the claim leaves roughly 500 GiB for
+# everything else. synology-csi-ssd-retain sets allowVolumeExpansion, so
+# growing it later is an edit to the number below plus a reconcile — no
+# migration, no downtime.
+#
+# The class is the *retain* variant added in cluster/synology-csi/. Deleting
+# this PVC must not delete the originals; with Retain the PV goes Released and
+# the LUN survives, and rebinding is a matter of clearing spec.claimRef.
+#
+# Retain is still not a backup. backup-cronjob.yaml sends the database to the
+# HDD, but the media itself has exactly one copy until Synology Hyper Backup is
+# pointed at /volume1 and given an external or offsite target.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: library
+spec:
+  accessModes:
+    # RWO is the honest access mode for iSCSI, and enough: immich-server runs a
+    # single replica and is the only writer.
+    - ReadWriteOnce
+  storageClassName: synology-csi-ssd-retain
+  resources:
+    requests:
+      storage: 250Gi

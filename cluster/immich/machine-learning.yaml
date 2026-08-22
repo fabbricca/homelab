@@ -1,0 +1,145 @@
+# CLIP embeddings for smart search, plus face detection and recognition. Not
+# strictly required — Immich stores and serves photos without it — but it is
+# the half of Immich that replaces what Google Photos actually did, so it goes
+# in from the start.
+#
+# CPU inference, deliberately. There is an OpenVINO image variant and the
+# HD Graphics 530 in both nodes is Gen 9, which OpenVINO still supports, but
+# the Intel device plugin advertises exactly one gpu.intel.com/i915 per node
+# and cluster/jellyfin/jellyfin.yaml already holds it. Transcoding a stream
+# someone is watching beats embedding a photo nobody is waiting for, so the
+# GPU stays with Jellyfin. Revisit if the plugin is ever given a sharedDevNum.
+#
+# Models are loaded on demand and unloaded after MACHINE_LEARNING_MODEL_TTL
+# (300s default) of inactivity, so the steady-state footprint of this pod is
+# small and the ceiling below is only reached while a job queue is draining.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-model-cache
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: machine-learning
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # Not an emptyDir: the CLIP and facial-recognition ONNX models are around a
+  # gigabyte in total and are fetched from Hugging Face on first use. An
+  # emptyDir would re-download them on every reschedule, and a rollout during
+  # an initial library import would stall the whole queue behind that.
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: machine-learning
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: machine-learning
+spec:
+  selector:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: machine-learning
+  ports:
+    - name: http
+      port: 3003
+      targetPort: 3003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: machine-learning
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: machine-learning
+spec:
+  replicas: 1
+  # RWO model cache, same constraint as everything else on iSCSI here.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: machine-learning
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: immich
+        app.kubernetes.io/component: machine-learning
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: machine-learning
+          image: ghcr.io/immich-app/immich-machine-learning@sha256:5a0839dc5303cd7215bcd2180a26aed3af41675aefb3e75e5157e9f10ad16e6e  # v3.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3003
+          env:
+            - name: TZ
+              value: Europe/Rome
+            # One worker. Each one keeps its own copy of every loaded model in
+            # memory, and 8 GB per node does not have a second copy to spare.
+            - name: MACHINE_LEARNING_WORKERS
+              value: "1"
+            # Four physical cores per node, shared with Jellyfin transcodes and
+            # everything else. Leaving this at the auto-detected core count
+            # lets an import queue saturate the box.
+            - name: MACHINE_LEARNING_REQUEST_THREADS
+              value: "2"
+            - name: MACHINE_LEARNING_MODEL_INTRA_OP_THREADS
+              value: "2"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            # MACHINE_LEARNING_CACHE_FOLDER defaults to /cache.
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { memory: "384Mi", cpu: "100m" }
+            # A loaded CLIP visual model plus the face detector is roughly
+            # 1.5 GB resident. This is the ceiling while a queue drains, not
+            # the idle cost.
+            limits:   { memory: "2Gi", cpu: "2" }
+          # No startupProbe: the process is up in seconds. It is model
+          # *downloads* that are slow, and those happen on first inference,
+          # long after /ping starts answering.
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            # Inference on four Skylake cores blocks the event loop for whole
+            # seconds at a time. A tight liveness probe here restarts the pod
+            # mid-job and loses the work.
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: immich-model-cache
+        - name: tmp
+          emptyDir: {}

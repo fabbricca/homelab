@@ -50,6 +50,26 @@ spec:
           location: /volume1
           fsType: ext4
 
+      # Same volume and protocol as `ssd`, but the LUN outlives its PVC.
+      #
+      # `synology-csi-ssd` reclaims with Delete, which is correct for anything
+      # that can be rebuilt — a Postgres that gets restored from a dump, a
+      # Prometheus TSDB, a MinIO bucket of derived artefacts. It is the wrong
+      # policy for the Immich library, which is the *primary* copy of family
+      # photos: there, `kubectl delete pvc` or a mistaken Flux prune would take
+      # the originals with it.
+      #
+      # Retain leaves the PV Released and the LUN intact, so recovering is a
+      # matter of clearing spec.claimRef and rebinding. The cost is that a
+      # genuinely unwanted volume has to be deleted by hand in DSM.
+      ssd-retain:
+        reclaimPolicy: Retain
+        volumeBindingMode: Immediate
+        parameters:
+          protocol: iscsi
+          location: /volume1
+          fsType: ext4
+
       # The chart ships six classes by default and Helm merges maps, so each
       # unwanted one has to be disabled explicitly or it gets created.
       iscsi-delete: { disabled: true }

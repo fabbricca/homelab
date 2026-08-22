@@ -1,0 +1,41 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: immich
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/immich
+  prune: true
+  # Longer than the 5m most applications use, for the same reason poseidon is:
+  # a cold start pulls four images that are in no node's cache — immich-server
+  # alone is well over a gigabyte — and then runs the initial schema migration
+  # against an empty database before the server will answer /api/server/ping.
+  timeout: 15m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  dependsOn:
+    - name: namespace-immich
+      namespace: flux-system
+    - name: gateway
+      namespace: flux-system
+    # The library and database volumes are dynamically provisioned iSCSI LUNs,
+    # and the library asks for the synology-csi-ssd-retain class that this
+    # Kustomization's HelmRelease creates. Without the dependency Flux can try
+    # to bind a PVC to a StorageClass that does not exist yet.
+    - name: synology-csi
+      namespace: flux-system
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: immich-server
+      namespace: immich
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: postgres
+      namespace: immich

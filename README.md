@@ -277,14 +277,22 @@ A Synology DS218+ at `10.0.0.15`, split by workload. Bay 1 is the HDD, bay 2 the
 SSD — but the SSD pool was created first, so **the SSD is `/volume1` and the HDD
 is `/volume2`**, the reverse of the bay numbering.
 
-| Class | Backing | Protocol | For |
-|-------|---------|----------|-----|
-| `synology-csi-ssd` *(default)* | `/volume1` — SSD | iSCSI, RWO | Postgres, MinIO, Keycloak |
-| `nfs-csi` | `/volume2/HDD` | NFS 4.1, RWX | Jellyfin media |
-| local-path | node NVMe | — | KubeVirt scratch |
+| Class | Backing | Protocol | Reclaim | For |
+|-------|---------|----------|---------|-----|
+| `synology-csi-ssd` *(default)* | `/volume1` — SSD | iSCSI, RWO | Delete | Postgres, MinIO, Keycloak, Immich's database |
+| `synology-csi-ssd-retain` | `/volume1` — SSD | iSCSI, RWO | **Retain** | The Immich photo library |
+| `nfs-csi` | `/volume2/HDD` | NFS 4.1, RWX | Delete | Jellyfin media |
+| local-path | node NVMe | — | — | KubeVirt scratch |
 
 Databases get block storage on flash; bulk media gets cheap sequential capacity
 with the shared access Jellyfin needs.
+
+The two SSD classes differ only in reclaim policy. Delete is right for anything
+rebuildable — a Postgres that gets restored from a dump, a Prometheus TSDB.
+Retain exists for the one dataset that is not: the Immich library is the
+*primary* copy of the photographs, so `kubectl delete pvc` or a mistaken Flux
+prune must not take the LUN with it. Recovering a Retained volume means
+clearing `spec.claimRef` on the Released PV and rebinding.
 
 Two things that will catch you out:
 
@@ -321,6 +329,7 @@ Two separate paths, deliberately:
 |---------|----------|------|
 | Jellyfin | Public | newt → Pangolin tunnel → Cilium Gateway |
 | Poseidon | Public | newt → Pangolin tunnel → Cilium Gateway |
+| Immich | Public | newt → Pangolin tunnel → Cilium Gateway |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
 
 Admin interfaces are never internet-facing. The tunnel is outbound-only, so it
@@ -354,7 +363,7 @@ subnet from anywhere.
 
 ## 11. Roadmap
 
-Delivered: Poseidon on `poseidon.iberu.me`; Terraform rebuild on Talos v1.13.8 with Terraform-owned Cilium;
+Delivered: Immich on `immich.iberu.me`; Poseidon on `poseidon.iberu.me`; Terraform rebuild on Talos v1.13.8 with Terraform-owned Cilium;
 ingress-nginx replaced by Cilium Gateway API; NAS storage split across iSCSI on
 the SSD and NFS on the HDD; Jellyfin transcoding on the Intel iGPU; Keycloak
 moved off H2 onto Postgres; nightly database backups with retention.
@@ -369,7 +378,7 @@ Remaining:
 | 9 | RBAC hardening: per-app ServiceAccounts, network policies, PSS labels |
 
 Also worth doing: Flux image automation (removes the manual digest-bump
-commits), Loki alongside Grafana, and Immich.
+commits) and Loki alongside Grafana.
 
 ---
 

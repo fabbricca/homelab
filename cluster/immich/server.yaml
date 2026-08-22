@@ -1,0 +1,147 @@
+# immich-server: the API, the web UI and the background microservices, all in
+# one image. Immich merged them in v1.118 — there is no separate web or
+# microservices container to run any more, and IMMICH_WORKERS_INCLUDE /
+# _EXCLUDE is what splits them if a deployment ever needs to.
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: server
+spec:
+  selector:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 2283
+      targetPort: 2283
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1
+  # Recreate for the same reason jellyfin uses it: immich-library is a RWO
+  # iSCSI volume, and a surge pod scheduled onto the other node would sit in
+  # ContainerCreating with a Multi-Attach error while the incumbent refuses to
+  # let go. Single-writer volume, single-writer rollout.
+  #
+  # It is also correct on its own terms — the server runs schema migrations at
+  # startup, so two versions must never be live at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: immich
+        app.kubernetes.io/component: server
+    spec:
+      automountServiceAccountToken: false
+      # The image ships a `node` user at uid 1000 and start.sh only execs node,
+      # so nothing here needs root. fsGroup makes the CSI-provisioned library
+      # volume group-writable, which is what Immich's startup mount check
+      # verifies by writing a `.immich` marker into each of upload/, library/,
+      # thumbs/, encoded-video/, profile/ and backups/.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: immich-server
+          image: ghcr.io/immich-app/immich-server@sha256:b434cb9287eea1471c9974845914d4dd328c9c2d652e446ed4930f99944f0ceb  # v3.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 2283
+          envFrom:
+            - secretRef:
+                name: immich-database
+          env:
+            - name: DB_HOSTNAME
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: REDIS_HOSTNAME
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: IMMICH_MACHINE_LEARNING_URL
+              value: http://machine-learning:3003
+            # exiftool falls back to this when a file carries no timezone, and
+            # it is also what the nightly job schedules are expressed in.
+            # Matches the postgres backup CronJob in cluster/postgres/.
+            - name: TZ
+              value: Europe/Rome
+            # Pangolin terminates TLS at the edge and newt forwards plain HTTP,
+            # so every request arrives from inside the cluster. Without this
+            # Immich records the Gateway's pod IP as the client address on
+            # every login and shared-link hit. The pod CIDR is Cilium's
+            # default 10.244.0.0/16.
+            - name: IMMICH_TRUSTED_PROXIES
+              value: "10.244.0.0/16"
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Not readOnlyRootFilesystem. /tmp is an emptyDir below and the
+            # image's own tree is root-owned and unwritable at uid 1000
+            # anyway, so this is likely a no-op — but upstream neither ships
+            # nor tests a read-only configuration, and a photo library is a
+            # poor place to discover an undocumented write path.
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            # IMMICH_MEDIA_LOCATION defaults to /data and upstream is emphatic
+            # that it should not be changed; the volume moves, not the path.
+            - name: library
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { memory: "512Mi", cpu: "200m" }
+            # The nodes have 8 GB each and the control plane already sits at
+            # 86% memory, so this is a ceiling rather than an ambition.
+            # Thumbnail and transcode jobs are the spiky part; if they get
+            # OOM-killed, lower the job concurrencies in
+            # Administration > Job Queues before raising this.
+            limits:   { memory: "2Gi", cpu: "2" }
+          # Generous, because a first boot on an empty database runs the whole
+          # migration chain before the port answers, and the readiness probe
+          # would otherwise restart the pod underneath it.
+          startupProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/server/ping
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: library
+          persistentVolumeClaim:
+            claimName: immich-library
+        - name: tmp
+          emptyDir: {}

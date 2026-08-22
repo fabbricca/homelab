@@ -1,0 +1,157 @@
+# Immich's own Postgres, and it has to be: Immich needs VectorChord (vchord.so
+# in shared_preload_libraries) for smart search and facial recognition, and the
+# shared instance in cluster/postgres/ is a plain pgvector build on PG 17 with
+# no way to load that extension without rebuilding it for every other tenant.
+#
+# The image is Immich's own — pgvector plus VectorChord plus pgvecto.rs, on
+# PG 14 — and the server checks the VectorChord version at startup and refuses
+# to run against an incompatible one. That pins the database to the
+# application, which is the opposite of the shared-instance model, and is why
+# this lives in the namespace rather than in cluster/postgres/.
+#
+# Backups therefore do not come from the nightly pg_dumpall in
+# cluster/postgres/; backup-cronjob.yaml in this directory covers this instance.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres-data
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # Delete, not the ssd-retain class the library uses. This database is
+  # reconstructible from a dump; the photographs are not.
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: immich
+  annotations:
+    checkov.io/skip1: "CKV_K8S_8"    # postgres has no HTTP endpoint to probe
+    checkov.io/skip2: "CKV_K8S_9"
+    checkov.io/skip3: "CKV_K8S_22"   # the entrypoint writes to the root fs
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  # RWO iSCSI volume: the replacement pod cannot attach while the incumbent
+  # holds it, and a rolling update deadlocks. Same reasoning as jellyfin.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: immich
+        app.kubernetes.io/component: postgres
+    spec:
+      automountServiceAccountToken: false
+      # Starting *as* 999 rather than letting the entrypoint gosu down from
+      # root is what makes `restricted` enforcement possible in this namespace.
+      # It works because the data directory is chowned to fsGroup by the CSI
+      # driver on attach, and because Immich's wrapper entrypoint copies its
+      # postgresql.conf into /etc/postgresql, which the image leaves mode 1777
+      # precisely so a non-root user can write there.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          # Immich's own Postgres image. The tag encodes the extension
+          # versions, and the server validates them on connect, so this is not
+          # a component that can be floated independently of the application.
+          image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            # Supplies DB_USERNAME / DB_PASSWORD / DB_DATABASE_NAME; the image's
+            # set-env.sh maps them onto POSTGRES_USER / POSTGRES_PASSWORD /
+            # POSTGRES_DB.
+            - secretRef:
+                name: immich-database
+          env:
+            # The image refuses to initialise into a directory that already has
+            # lost+found in it, which every freshly formatted iSCSI LUN does.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # Immich's entrypoint refuses to start on NFS/SMB and picks
+            # postgresql.ssd.conf or postgresql.hdd.conf from this. The LUN is
+            # ext4 over iSCSI on /volume1, which is flash, so SSD is correct —
+            # it sets effective_io_concurrency 200 and random_page_cost 1.2.
+            - name: DB_STORAGE_TYPE
+              value: SSD
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums"
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Not readOnlyRootFilesystem: the entrypoint writes its rendered
+            # config to /etc/postgresql, and the postgres entrypoint writes to
+            # /var/run/postgresql and /tmp during initdb.
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # The compose file asks for shm_size: 128mb. Kubernetes gives a
+            # container 64Mi of /dev/shm by default, which parallel query
+            # workers can exhaust on the sort-heavy queries Immich runs over
+            # the asset table.
+            - name: shm
+              mountPath: /dev/shm
+          resources:
+            requests: { memory: "384Mi", cpu: "100m" }
+            # postgresql.ssd.conf sets shared_buffers to 512MB, so the limit has
+            # to leave room for that plus per-backend work_mem before the kernel
+            # starts killing backends.
+            limits:   { memory: "1536Mi", cpu: "1" }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "immich", "-d", "immich"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "immich", "-d", "immich"]
+            initialDelaySeconds: 60
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: immich-postgres-data
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi

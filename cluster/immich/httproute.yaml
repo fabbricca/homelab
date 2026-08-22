@@ -1,0 +1,37 @@
+# Attaches to the shared Gateway in cluster/gateway/. Pangolin terminates TLS
+# at the edge and newt forwards plain HTTP to the Gateway's :80 listener, so
+# the hostname here is what makes the Pangolin resource for immich.iberu.me
+# land on this application. The :443 listener serves the same route directly
+# from the LAN using the wildcard certificate.
+#
+# Public rather than Tailscale-only, unlike Grafana and Headlamp: the whole
+# point is that a phone uploads new photos over mobile data without anyone
+# thinking about it. Immich's own accounts are the access control, so turn off
+# public registration in Administration > Settings once the admin user exists.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - immich.iberu.me
+  rules:
+    - backendRefs:
+        - name: immich-server
+          port: 2283
+      timeouts:
+        # Disabled, as for jellyfin. Envoy's 15s default would cut off any
+        # upload of a video larger than the link can push in fifteen seconds —
+        # which, on a phone's upstream, is most of them. It also covers the
+        # long-lived SSE connection the web UI holds open for job progress.
+        #
+        # The matching limit on the other side of the tunnel is Pangolin's, and
+        # that one is not configurable from here: if large uploads fail with a
+        # 413 rather than a timeout, the body-size cap is at the edge.
+        request: 0s

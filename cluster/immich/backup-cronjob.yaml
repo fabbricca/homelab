@@ -1,0 +1,160 @@
+# Nightly logical backup of the Immich database, onto the HDD.
+#
+# Immich takes its own nightly dump and puts it in UPLOAD_LOCATION/backups,
+# which is /data/backups on the library volume — the same iSCSI LUN, on the
+# same SSD, as the photographs it describes. That copy is worth keeping,
+# because Administration > Maintenance can restore from it in two clicks. It
+# is not worth relying on: any failure that takes /volume1 takes both the
+# library and its only description of what the files mean.
+#
+# So this does what cluster/postgres/backup-cronjob.yaml does for the shared
+# instance — pg_dumpall to /volume2, the HDD — and the two together mean
+# neither disk holds both a database and its own backups.
+#
+# The output is a plain gzipped pg_dumpall, the same shape Immich produces, so
+# a dump from here can also be fed back through the "Select from computer"
+# path in the restore UI.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-db-backups
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: backup
+spec:
+  capacity:
+    # Advisory only; NFS enforces no quota.
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  mountOptions:
+    - hard
+    - nfsvers=4.1
+  csi:
+    driver: nfs.csi.k8s.io
+    # Must be unique across the cluster; not a real path.
+    volumeHandle: immich-db-backups-10.0.0.15
+    volumeAttributes:
+      server: "10.0.0.15"
+      # Create this on the NAS before the first run:
+      #   File Station > HDD > New Folder > "immich-db-backups"
+      share: "/volume2/HDD/immich-db-backups"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-db-backups
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ""
+  volumeName: immich-db-backups
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: immich-db-backup
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: backup
+spec:
+  # 03:45 local — after the shared instance's 03:15 dump, so the two are never
+  # competing for the NAS, and clear of Immich's own 03:00 integrity checks.
+  schedule: "45 3 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: immich
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: pg-dumpall
+              # Same image as the server. pg_dumpall from a different build
+              # would not necessarily know how to emit the VectorChord and
+              # pgvecto.rs extension statements the restore needs, and a newer
+              # client against an older server is the one direction that does
+              # not work.
+              image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              env:
+                - name: PGHOST
+                  value: postgres.immich.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: immich-database, key: DB_USERNAME }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: immich-database, key: DB_PASSWORD }
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef: { name: immich-database, key: DB_DATABASE_NAME }
+                - name: RETENTION_DAYS
+                  value: "14"
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  OUT="/backups/immich-dumpall-${STAMP}.sql.gz"
+
+                  until pg_isready -q; do echo "waiting for postgres"; sleep 5; done
+
+                  # Write to a temp name first, then rename. A dump interrupted
+                  # halfway would otherwise look like a valid backup.
+                  pg_dumpall --clean --if-exists | gzip -9 > "${OUT}.partial"
+                  mv "${OUT}.partial" "${OUT}"
+                  echo "wrote ${OUT} ($(stat -c%s "${OUT}") bytes)"
+
+                  # gzip integrity check — catches a truncated or corrupt dump
+                  # now rather than during a restore.
+                  gzip -t "${OUT}" && echo "gzip integrity OK"
+
+                  find /backups -name 'immich-dumpall-*.sql.gz' -type f \
+                    -mtime "+${RETENTION_DAYS}" -print -delete
+                  echo "retained: $(ls -1 /backups/immich-dumpall-*.sql.gz 2>/dev/null | wc -l) dump(s)"
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: immich-db-backups

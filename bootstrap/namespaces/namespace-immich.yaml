@@ -1,0 +1,23 @@
+# Immich — self-hosted photo and video backup.
+#
+# Enforces `restricted`, unlike media and poseidon. Those two settle for
+# `baseline` because the upstream Postgres and MinIO images start as root and
+# gosu down in their own entrypoints. Nothing here does: the immich-server
+# image ships a `node` user at uid 1000 and its start.sh only execs node, the
+# machine-learning image needs no privileged setup, and both Postgres and
+# Valkey are started directly as uid 999 (see the note in postgres.yaml).
+#
+# So this namespace is the first one to actually enforce what the rest of the
+# cluster only warns about — roadmap phase 9, one application at a time.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: immich
+  labels:
+    app.kubernetes.io/name: immich
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
