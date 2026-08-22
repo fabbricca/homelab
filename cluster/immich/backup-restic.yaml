@@ -1,0 +1,193 @@
+# The second copy of the photographs.
+#
+# Until this exists, the library has exactly one copy: a 250 GiB iSCSI LUN on
+# the NAS SSD. The nightly pg_dumpall in backup-cronjob.yaml protects the
+# database and nothing else — restoring it against a library that no longer
+# exists gives you a catalogue of missing files.
+#
+# So: restic, nightly, from the library volume onto the worker's 2.5" SATA
+# disk. Different disk, different machine, different failure domain from the
+# NAS. What it is not is offsite — a fire or a theft takes both copies. That
+# is the next thing to add, and the repository is deliberately structured so
+# adding it is small; see the note at the bottom of this file.
+#
+# restic rather than rsync or tar because a photo library is exactly its best
+# case: content-addressed chunks, so re-running it costs only the new photos;
+# a real retention policy, so deleting an album today does not erase it from
+# last month's snapshot; and `check`, so bit rot on a spinning disk that
+# nobody reads for a year is discovered before a restore depends on it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: immich-restic-backup
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: backup
+spec:
+  # 04:30 local, last in the nightly chain. Immich dumps its own database to
+  # /data/backups at 02:00 and this includes that directory, so each snapshot
+  # is a complete restore — originals and the database that describes them,
+  # from the same night.
+  schedule: "30 4 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Six hours. The first run reads and chunks the entire library onto a
+      # 7200 rpm 2.5" disk and can genuinely take hours; every run after that
+      # is minutes, because restic only reads what changed. A deadline stops a
+      # wedged job from still holding the repository lock at the next
+      # midnight.
+      activeDeadlineSeconds: 21600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: immich
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            # Matches the uid immich-server writes the library as, which is
+            # what makes the read-only mount below readable. It also gets the
+            # freshly formatted XFS backup volume chowned on first use —
+            # OnRootMismatch so that a 400 GiB repository is not recursively
+            # chowned every single night.
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: restic
+              image: restic/restic@sha256:7f44e0057b82348597568ea209360762d0b38f8e1dbc8ad859661ac1055e45f2  # 0.19.0
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              env:
+                - name: RESTIC_REPOSITORY
+                  value: /repo
+                - name: RESTIC_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: immich-restic, key: RESTIC_PASSWORD }
+                # Default is $HOME/.cache/restic, and HOME is unset here.
+                - name: RESTIC_CACHE_DIR
+                  value: /cache
+                - name: TZ
+                  value: Europe/Rome
+              # The image's entrypoint is the restic binary itself, so this
+              # replaces it with a shell. Alpine base, so /bin/sh exists.
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  # `cat config` is the cheap probe for "does a repository
+                  # already live here" — it reads one small file and needs no
+                  # lock, unlike `snapshots`.
+                  restic cat config >/dev/null 2>&1 || {
+                    echo "no repository at ${RESTIC_REPOSITORY}, initialising"
+                    restic init
+                  }
+
+                  # --host is not cosmetic. restic defaults it to the pod's
+                  # hostname, and a CronJob's pod name is random every night —
+                  # so every snapshot would land under a different host, and
+                  # the `forget` policy below, which groups by host, would
+                  # keep all of them forever and prune nothing.
+                  #
+                  # thumbs/ and encoded-video/ are excluded because Immich
+                  # regenerates both from the originals (Administration > Job
+                  # Queues > Missing). They are also the two directories that
+                  # churn most, so excluding them keeps the repository small
+                  # and the nightly run short. The cost is paid once, at
+                  # restore time, in CPU rather than in disk every night.
+                  restic backup /data \
+                    --host immich \
+                    --tag immich \
+                    --exclude /data/thumbs \
+                    --exclude /data/encoded-video \
+                    --exclude /data/lost+found \
+                    --exclude-caches
+
+                  # Keeps a week of days, a month of weeks, half a year of
+                  # months. --prune actually reclaims the space; without it
+                  # forget only unlinks the snapshots.
+                  restic forget \
+                    --host immich \
+                    --tag immich \
+                    --keep-daily 7 \
+                    --keep-weekly 4 \
+                    --keep-monthly 6 \
+                    --prune
+
+                  # Structural check every night, plus 2% of the actual pack
+                  # data. The subset rotates, so the whole repository is
+                  # verified byte-for-byte over about seven weeks — which is
+                  # the only way bit rot on a disk nobody reads gets found
+                  # before a restore needs it.
+                  restic check --read-data-subset=2%
+
+                  echo "--- snapshots ---"
+                  restic snapshots --host immich --tag immich
+                  echo "--- repository size ---"
+                  restic stats --mode raw-data --host immich --tag immich
+              volumeMounts:
+                # Read-only: a backup job has no business writing to the
+                # library, and the RWO volume is mounted read-write by
+                # immich-server on this same node at the same time.
+                - name: library
+                  mountPath: /data
+                  readOnly: true
+                - name: repo
+                  mountPath: /repo
+                - name: cache
+                  mountPath: /cache
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: { memory: "512Mi", cpu: "200m" }
+                # restic holds the repository index in memory; it grows with
+                # the number of blobs, not the size of the library.
+                limits:   { memory: "2Gi", cpu: "2" }
+          volumes:
+            - name: library
+              persistentVolumeClaim:
+                claimName: immich-library
+                readOnly: true
+            - name: repo
+              persistentVolumeClaim:
+                claimName: immich-backup
+            # Not a PVC: the cache is a local index of the repository and
+            # restic rebuilds it when it is missing. It costs a slower first
+            # run after a reschedule and nothing else.
+            - name: cache
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+---
+# --- Adding the offsite copy ---
+#
+# Two copies in the same room is two-thirds of a 3-2-1 strategy. The missing
+# third is a repository somewhere that a house fire cannot reach.
+#
+# The cheap version is a second CronJob, identical to the one above except
+# that RESTIC_REPOSITORY points at object storage — `s3:s3.eu-central-003.
+# backblazeb2.com/<bucket>` for Backblaze B2, or an R2 endpoint — with
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY alongside RESTIC_PASSWORD in the
+# secret. At B2's ~$6/TB/month a 50 GiB library costs about thirty cents a
+# month.
+#
+# The better version is `restic copy`, which transfers snapshots between
+# repositories without re-reading the library at all, so the offsite job costs
+# nothing on the NAS. It only deduplicates properly if the second repository
+# is created with `restic init --repo <remote> --copy-chunker-params
+# --from-repo /repo` — worth knowing before the remote repository exists,
+# because it cannot be changed afterwards.

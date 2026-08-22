@@ -31,5 +31,11 @@ resources:
   # Nightly pg_dumpall onto the HDD, so the database and its backups are never
   # on the same disk.
   - backup-cronjob.yaml
+  # The second copy of the library: restic onto the worker's 2.5" SATA disk,
+  # which is a different disk in a different machine from the NAS SSD the
+  # originals live on. Not offsite — see the note at the end of
+  # backup-restic.yaml.
+  - backup-local-pv.yaml
+  - backup-restic.yaml
 commonLabels:
   app.kubernetes.io/managed-by: flux

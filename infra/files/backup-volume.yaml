@@ -1,0 +1,57 @@
+# The 2.5" SATA bay, handed to Kubernetes as a backup target.
+#
+# Both EliteDesks carry a 500 GB HGST HTS725050A7 alongside the NVMe boot
+# disk. The README has always reserved these bays for backups rather than
+# cluster storage; this is what actually wires one up. It is consumed by
+# cluster/immich/backup-local-pv.yaml, which restic writes the Immich library
+# into every night.
+#
+# --- Why a UserVolumeConfig and not machine.disks ---
+#
+# The obvious spelling is `machine.disks` with device: /dev/sdb, and it is a
+# trap on these nodes. Device names are assigned in attach order and the
+# Synology CSI driver attaches an iSCSI LUN per PVC, so today the control
+# plane sees sda = a 54 GB LUN and sdb = the SATA disk, while the worker sees
+# sda = the SATA disk and sdb..sdj = ten LUNs. Those letters are not stable
+# across a reboot. A config that names /dev/sdb would, on the wrong boot
+# order, partition and format somebody's PersistentVolume.
+#
+# UserVolumeConfig selects the disk by property instead. `transport == "sata"`
+# matches exactly one disk on each node — NVMe reports "nvme" and every LUN
+# reports "iscsi" — and it stays correct no matter how the kernel enumerates
+# them. `!system_disk` is redundant here (Talos is installed to the NVMe) and
+# costs nothing.
+#
+# Talos provisions a partition labelled `u-backup` and mounts it at
+# /var/mnt/backup. Sized to 400 GiB of the 465 GiB usable, leaving room for a
+# second user volume later; taking the whole disk would make adding one a
+# repartition.
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: backup
+provisioning:
+  diskSelector:
+    match: disk.transport == "sata" && !system_disk
+  minSize: 100GiB
+  maxSize: 400GiB
+filesystem:
+  type: xfs
+---
+# The kubelet mounts /var/mnt read-only by default — see the mount list in
+# Talos's internal/app/machined/pkg/system/services/kubelet.go, where
+# UserVolumeMountPoint is bound with "ro". User volumes are therefore visible
+# to pods but not writable by them, which is fine for a media library served
+# read-only and useless for a backup target.
+#
+# This re-binds the one path we need as rw. rshared so that mounts made
+# underneath it propagate into the kubelet's namespace.
+machine:
+  kubelet:
+    extraMounts:
+      - destination: /var/mnt/backup
+        type: bind
+        source: /var/mnt/backup
+        options:
+          - bind
+          - rshared
+          - rw

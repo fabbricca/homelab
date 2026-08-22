@@ -49,6 +49,26 @@ spec:
         app.kubernetes.io/component: server
     spec:
       automountServiceAccountToken: false
+      # Pinned, and this is the one place in the repository that pins anything.
+      #
+      # The reason is backup-restic.yaml. That job has to read immich-library,
+      # which is ReadWriteOnce, so it can only run on whichever node the volume
+      # is attached to — this pod's node. It also has to write the restic
+      # repository, which is a `local` volume on the worker's SATA disk and
+      # cannot follow the pod anywhere. If those two nodes ever disagree the
+      # backup silently stops happening, which is the worst way for a backup to
+      # fail.
+      #
+      # Pinning costs less than it looks like it does. Every volume this
+      # application owns is RWO iSCSI, so it already runs in exactly one place;
+      # what the scheduler was buying was automatic recovery onto the control
+      # plane, and the control plane sits at 88% memory running etcd, which is
+      # not somewhere a 2 GiB photo server should land by accident. Failing
+      # over is a deliberate act either way — change this and the hostname in
+      # backup-local-pv.yaml, and restic builds a fresh repository on the other
+      # node's identical disk.
+      nodeSelector:
+        kubernetes.io/hostname: k8s-hs-worker-0
       # The image ships a `node` user at uid 1000 and start.sh only execs node,
       # so nothing here needs root. fsGroup makes the CSI-provisioned library
       # volume group-writable, which is what Immich's startup mount check

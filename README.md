@@ -37,7 +37,8 @@ Notes:
   Jellyfin transcoding. It does H.264 encode/decode and HEVC 8-bit decode; no
   AV1, no HEVC 10-bit encode.
 * Desktop Mini chassis: **2 SODIMM slots, 32 GB maximum**, one M.2 and one 7 mm
-  2.5" bay. The 2.5" bays are reserved as backup targets, not cluster storage.
+  2.5" bay. Both bays hold a 500 GB HGST HTS725050A7 and are backup targets,
+  not cluster storage — see section 7.
 * **VT-x is enabled** in the BIOS on both nodes, as KubeVirt requires.
 
 ### Control-plane topology
@@ -305,8 +306,50 @@ Two things that will catch you out:
 On Talos the driver needs `--iscsiadm-path=/usr/local/sbin/iscsiadm`; without it
 every attach fails with "open-iscsi tools not found on host".
 
-Replication is not backup. The NAS is the backup target, and its own backups
-should leave the box (USB or offsite).
+### Backups
+
+Replication is not backup, and neither is a second directory on the same disk.
+Three things run nightly, deliberately landing on three different disks:
+
+| What | When | Where | Disk |
+|------|------|-------|------|
+| `pg_dumpall` of the shared Postgres | 03:15 | `/volume2/HDD/postgres-backups` | NAS HDD |
+| `pg_dumpall` of Immich's Postgres | 03:45 | `/volume2/HDD/immich-db-backups` | NAS HDD |
+| restic of the Immich library | 04:30 | `/var/mnt/backup` on the worker | node SATA |
+
+The databases live on the NAS SSD and are dumped to the NAS HDD, so losing
+either drive does not take both a database and its backups. The Immich library
+is the one dataset whose loss is unrecoverable — it is the *primary* copy of
+the photographs, not a cache of something else — so it goes further, onto a
+disk in a different machine entirely.
+
+**The 2.5" bays.** Both nodes carry a 500 GB HGST, wired up by
+`infra/files/backup-volume.yaml` as a Talos user volume mounted at
+`/var/mnt/backup`. Two details there are worth knowing:
+
+* The disk is selected by `disk.transport == "sata"`, **not** by `/dev/sdX`.
+  Device letters are not stable on these nodes — the Synology CSI driver
+  attaches an iSCSI LUN per PVC, and those take `sd*` names in attach order,
+  so the control plane currently sees `sda` as a 54 GB LUN and `sdb` as the
+  SATA disk while the worker sees the reverse. A config naming `/dev/sdb`
+  would eventually format a PersistentVolume.
+* Talos binds `/var/mnt` into the kubelet **read-only**, so a user volume is
+  visible to pods but not writable by them. The backup volume needs an
+  explicit `machine.kubelet.extraMounts` entry to get `rw`.
+
+Only the worker's disk is claimed, by a `local` PV. A restic repository split
+across two disks is two half-backups, so one node has to own it — and that
+node has to be the one Immich runs on, because the library volume is RWO.
+Hence the single `nodeSelector` in `cluster/immich/server.yaml`; the control
+plane's identical disk is provisioned and idle, waiting for a failover that is
+a two-line change.
+
+**What is still missing is offsite.** Both copies are in the same room. A fire
+or a theft takes the photographs. The end of
+`cluster/immich/backup-restic.yaml` describes the two ways to close that —
+a second restic repository on B2 or R2, or `restic copy` into one — and
+Synology Hyper Backup pointed at an external USB disk covers the rest of
+`/volume1` at the same time.
 
 ---
 

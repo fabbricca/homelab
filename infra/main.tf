@@ -175,12 +175,12 @@ locals {
         # needs it, and keeping the nodes identical avoids a resolution
         # difference that would only surface after a role change.
         file("${path.module}/files/issuer-host-entry.yaml"),
+        # The 2.5" SATA bay as a backup target. Applied to both nodes: the
+        # disk selector is a property match, not a device path, so the same
+        # document is correct on either one, and having the volume present on
+        # both means moving the backup is a matter of moving the PV.
+        file("${path.module}/files/backup-volume.yaml"),
       ],
-      node.second_disk != null ? [
-        templatefile("${path.module}/templates/second-disk-mounts.yaml.tmpl", {
-          second_disk = node.second_disk
-        })
-      ] : [],
       local.nut_enabled ? [
         templatefile("${path.module}/templates/nut-client.yaml.tmpl", {
           nut_server_host = var.nut_server_host

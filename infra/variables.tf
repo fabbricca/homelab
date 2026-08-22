@@ -94,21 +94,22 @@ variable "node_data" {
     1x M.2 NVMe + 1x 2.5" SATA). The control plane is schedulable — see
     files/cp-scheduling.yaml — because two nodes cannot afford a dedicated one.
 
-    second_disk is deliberately left unset: the 2.5" bays are reserved as backup
-    targets, not cluster storage. Set it only to hand a disk to the kubelet.
+    The 2.5" bays are backup targets, not cluster storage. They are wired up by
+    files/backup-volume.yaml, which selects the disk by transport rather than by
+    a /dev/sdX path — device letters are not stable on these nodes, because the
+    Synology CSI driver attaches an iSCSI LUN per PVC and those take sd* names
+    in attach order.
   EOT
   type = object({
     controlplanes = map(object({
       install_disk = string
       interface    = string
       hostname     = optional(string)
-      second_disk  = optional(string)
     }))
     workers = map(object({
       install_disk = string
       interface    = string
       hostname     = optional(string)
-      second_disk  = optional(string)
     }))
   })
   default = {
