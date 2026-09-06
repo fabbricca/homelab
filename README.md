@@ -188,7 +188,20 @@ execution mode does not evaluate.
 
 Cilium is rendered by Terraform (`data.helm_template`) and embedded in the
 control-plane machine config as an `inlineManifest`. Talos applies it at
-bootstrap and re-applies on control-plane reboot.
+bootstrap — and, contrary to what this README used to say, **never again**.
+Talos's manifest controller keeps an inventory
+(`kube-system/talos-bootstrap-manifests-inventory`) and skips any object
+already recorded in it, so a changed `cilium-config` in the machine config is
+re-rendered (`talosctl get manifests` bumps the `99-cilium` version) but not
+re-applied, reboot or no reboot.
+
+Changing a Cilium value is therefore two steps, and both are required:
+
+1. Edit the values in `infra/main.tf` and `terraform apply` — this is what a
+   rebuild installs.
+2. Make the same change live: `kubectl -n kube-system patch cm cilium-config`,
+   then `kubectl -n kube-system rollout restart ds/cilium deploy/cilium-operator`.
+   Agents read most settings only at start.
 
 This is not a stylistic choice: `infra/files/cilium-prerequisite.yaml` sets
 `cni: none` and disables kube-proxy, so there is no pod network for Flux to
@@ -201,6 +214,28 @@ management left to Talos, and a capability set that deliberately omits
 `SYS_MODULE` (Talos forbids workloads loading kernel modules).
 
 MetalLB has been removed; Cilium LB IPAM and L2 announcements replace it.
+
+### Pod MTU, and why `devices` is pinned to `eno1`
+
+Cilium auto-detects data-plane devices and derives the pod MTU from the
+*smallest* of them. On these nodes that included `tailscale0` (1280) from the
+Tailscale system extension, so every pod got a 1280-byte interface instead of
+the 1500 that `eno1` allows. `devices = "eno1"` in `infra/main.tf` fixes it.
+
+This was the root cause of two problems that had been treated as tunnel bugs:
+
+* The Tailscale operator proxies for Headlamp and Grafana delivered about
+  20 KB/s from every client — Headlamp's 6 MB bundle took minutes and the
+  browser gave up before ever reaching the Keycloak login page. A full
+  WireGuard datagram is 1324 bytes on the wire; leaving a 1280-byte pod
+  interface it had to be fragmented, and 5–18% of those fragments were lost,
+  which collapses TCP inside the tunnel to one segment per ACK timer. After
+  the fix: 70–115 MB/s from the nodes, 3–7 MB/s from a Wi-Fi laptop.
+* newt only worked with its MTU forced down to 1100 (see
+  `cluster/newt/helmrelease-newt.yaml`). Same mechanism.
+
+Verify with `cilium-dbg status --verbose` (`Devices: eno1` and
+`MTU updated (1500)`) and `cat /sys/class/net/eth0/mtu` inside any pod.
 
 ### HTTP routing (Gateway API)
 
@@ -427,11 +462,14 @@ commits) and Loki alongside Grafana.
 
 ## 12. Known issues
 
-* **Keycloak runs `start-dev` against the embedded H2 database.** Acceptable
-  while it only serves this homelab, but it should move to `start` backed by the
-  Postgres in `cluster/postgres/` before it becomes the SSO provider for the
-  cluster itself. Realms now have to be created in the admin UI, or imported by
-  mounting them at `/opt/keycloak/data/import`.
+* **Memory.** Both nodes still run a single 8 GB SODIMM (one slot each is
+  empty), and sit at 82–95% memory. On 6 Sep 2026 the worker OOM-killed
+  Poseidon's `web` pod repeatedly (18 restarts against its 512 Mi limit — the
+  container runs a child `redis-server` that alone reaches ~460 MiB). Two
+  8 GB sticks are on the way; until then, treat anything memory-hungry as a
+  risk to its neighbours.
+* **Poseidon `web` needs either a larger limit or a smaller footprint.** See
+  above — it is the one workload actively being killed.
 
 ---
 

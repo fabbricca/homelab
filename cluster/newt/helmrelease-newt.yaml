@@ -69,6 +69,15 @@ spec:
           # filters ICMP on the VPS, so Path MTU Discovery is structurally
           # broken and the kernel still believes pmtu is 9000 (ens3 is a jumbo
           # frame interface). The tunnel therefore has to be told.
+          #
+          # Postscript (Sep 2026): the deeper reason full-size packets stalled
+          # was on this side, not Oracle's. Cilium had clamped every pod to a
+          # 1280-byte interface by auto-detecting tailscale0 as a device, so
+          # newt's datagrams were being fragmented on the way out and partly
+          # lost. That is fixed (`devices = "eno1"` in infra/main.tf; pods are
+          # 1500 now). This override is left in place because it works and has
+          # not been re-tested without it; it can probably return to the
+          # default, one experiment at a time.
           MTU: "1100"
         extraVolumes:
           - name: newt-home
