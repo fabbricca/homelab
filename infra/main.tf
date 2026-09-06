@@ -46,6 +46,29 @@ data "helm_template" "cilium" {
       k8sServiceHost       = "localhost"
       k8sServicePort       = 7445
 
+      # Pin the data-plane device. Without this Cilium auto-detects every
+      # interface with a non-local route, and on these nodes that includes
+      # tailscale0 from the Tailscale system extension. Cilium then derives the
+      # pod MTU from the *smallest* detected device — tailscale0 is 1280 — so
+      # every pod got a 1280-byte interface instead of the 1450 (1500 minus
+      # VXLAN) that eno1 allows.
+      #
+      # That was the root cause of two long-running problems that looked like
+      # tunnel bugs: the Tailscale operator proxies for Headlamp and Grafana
+      # delivering ~20 KB/s, and newt only working with its MTU forced down to
+      # 1100. A WireGuard datagram carrying a full 1280-byte inner packet is
+      # 1324 bytes on the wire; leaving a 1280-byte pod interface it has to be
+      # fragmented, and a measured 5-18% of those fragments never arrived. TCP
+      # inside the tunnel collapsed to one segment per ACK timer. Verified by
+      # A/B on a proxy with a 1200-byte tun (no fragmentation): 17 KB/s became
+      # 30-105 MB/s from the same client.
+      #
+      # Restricting devices to eno1 lets MTU auto-detection see only the NIC.
+      # Nothing relied on tailscale0 being a Cilium device: the L2 announcement
+      # policy already names eno1, there are no NodePort services, and the
+      # subnet router is a host-level extension outside Cilium's view.
+      devices = "eno1"
+
       # SYS_MODULE is deliberately absent: Talos forbids workloads loading
       # kernel modules, and Cilium's default capability set would fail.
       securityContext = {
