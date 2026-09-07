@@ -43,7 +43,7 @@ metadata:
     checkov.io/skip2: "CKV_K8S_9"
     checkov.io/skip3: "CKV_K8S_22"   # the entrypoint writes to the root fs
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   # RWO iSCSI volume: the replacement pod cannot attach while the incumbent
   # holds it, and a rolling update deadlocks. Same reasoning as jellyfin.
   strategy:

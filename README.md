@@ -406,9 +406,14 @@ Two separate paths, deliberately:
 | Surface | Exposure | Path |
 |---------|----------|------|
 | Jellyfin | Public | newt → Pangolin tunnel → Cilium Gateway |
-| Poseidon | Public | newt → Pangolin tunnel → Cilium Gateway |
+| Poseidon | Public — **stopped** | newt → Pangolin tunnel → Cilium Gateway |
 | Immich | Public | newt → Pangolin tunnel → Cilium Gateway |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
+
+Poseidon is scaled to zero (`cluster/poseidon/`, every Deployment at
+`replicas: 0`). Its Pangolin resource, HTTPRoute and both PVCs are untouched, so
+the hostname resolves and answers 503 rather than 404, and restarting it is a
+one-commit change. Nothing else on that row is affected.
 
 Admin interfaces are never internet-facing. The tunnel is outbound-only, so it
 needs no port forwarding and works behind CGNAT. Tailscale nodes advertise
@@ -469,7 +474,10 @@ commits) and Loki alongside Grafana.
   8 GB sticks are on the way; until then, treat anything memory-hungry as a
   risk to its neighbours.
 * **Poseidon `web` needs either a larger limit or a smaller footprint.** See
-  above — it is the one workload actively being killed.
+  above. Poseidon has since been scaled to zero, which removes the symptom but
+  not the cause: the limit is still 512 Mi and the child `redis-server` still
+  reaches ~460 MiB, so this has to be fixed before it is started again, not
+  after it starts OOM-looping a second time.
 
 ---
 

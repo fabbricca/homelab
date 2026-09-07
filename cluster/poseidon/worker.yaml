@@ -11,7 +11,7 @@ metadata:
   name: worker
   namespace: poseidon
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   strategy:
     type: Recreate
   selector:
@@ -113,7 +113,7 @@ metadata:
   name: beat
   namespace: poseidon
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   # Two beats mean every periodic task fires twice. Recreate is the cheap way
   # to guarantee there is never a moment with both.
   strategy:

@@ -25,7 +25,7 @@ metadata:
     checkov.io/skip1: "CKV_K8S_8"
     checkov.io/skip2: "CKV_K8S_9"
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   strategy:
     type: Recreate
   selector:

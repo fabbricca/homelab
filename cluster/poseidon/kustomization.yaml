@@ -18,6 +18,29 @@ namespace: poseidon
 # Postgres, Redis and MinIO are namespace-local rather than the shared instances
 # in cluster/postgres/ and cluster/minio/, so the whole application is one
 # namespace to delete. See the note at the top of postgres.yaml for the cost.
+# ── STOPPED ────────────────────────────────────────────────────────────────
+# Every Deployment here is at `replicas: 0`. Poseidon is not needed at the
+# moment; this frees its CPU and memory without giving up anything else.
+#
+# Scaled to zero in Git rather than with `kubectl scale`, because this
+# Kustomization reconciles every 15m: a manual scale would be silently undone
+# by the next reconciliation, and the pods would come back on their own.
+# Suspending the Kustomization would also have worked, but that parks the
+# cluster in a state the repository does not describe — the opposite of what
+# `prune: true` and "no drift" are for here.
+#
+# What is deliberately NOT removed, so bringing it back is one commit:
+#   * both PVCs — poseidon-postgres-data (8Gi) and poseidon-minio-data (10Gi).
+#     The database and object store survive intact; nothing here deletes data.
+#   * the Secrets, ConfigMap, Services and the HTTPRoute. They cost nothing
+#     while idle. poseidon.iberu.me answers 503 from Envoy rather than 404,
+#     which reads as "down" instead of "never existed".
+#
+# To bring it back: set these nine `replicas` back to 1 and push. The api
+# Deployment's migrate initContainer re-runs Alembic on the existing volume,
+# which is a no-op when the schema is already at head.
+# ───────────────────────────────────────────────────────────────────────────
+
 resources:
   - secret.yaml
   - config.yaml

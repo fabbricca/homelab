@@ -22,7 +22,7 @@ metadata:
   name: api
   namespace: poseidon
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   # Migrations run as this pod's initContainer, so two of them must never be
   # alive at once. Recreate makes that structural rather than probabilistic.
   strategy:

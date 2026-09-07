@@ -17,7 +17,7 @@ metadata:
   name: console
   namespace: poseidon
 spec:
-  replicas: 1
+  replicas: 0            # stopped — see kustomization.yaml
   selector:
     matchLabels:
       app.kubernetes.io/name: poseidon
