@@ -26,8 +26,8 @@ extensions, and the CNI); Flux reconciles everything above it from `cluster/`.
 
 | Role | Hardware | CPU | RAM | Storage | Notes |
 |------|----------|-----|-----|---------|-------|
-| Control plane | HP EliteDesk 800 G2 Desktop Mini | i7-6700T (4C/8T, 35 W) | 8 GB → 24 GB | M.2 NVMe + 2.5" SATA | Schedulable |
-| Worker | HP EliteDesk 800 G2 Desktop Mini | i7-6700T (4C/8T, 35 W) | 8 GB → 24 GB | M.2 NVMe + 2.5" SATA | |
+| Control plane | HP EliteDesk 800 G2 Desktop Mini | i7-6700T (4C/8T, 35 W) | 16 GB (2×8, dual-channel) | M.2 NVMe + 2.5" SATA | Schedulable |
+| Worker | HP EliteDesk 800 G2 Desktop Mini | i7-6700T (4C/8T, 35 W) | 16 GB (2×8, dual-channel) | M.2 NVMe + 2.5" SATA | |
 | Storage | Synology DS218+ | Celeron J3355 | 2 GB (max 6 GB) | 2-bay 3.5"/2.5" | NFS + iSCSI |
 | Power | Eaton 5E UPS | – | – | – | USB to the NAS, NUT server |
 
@@ -39,6 +39,21 @@ Notes:
 * Desktop Mini chassis: **2 SODIMM slots, 32 GB maximum**, one M.2 and one 7 mm
   2.5" bay. Both bays hold a 500 GB HGST HTS725050A7 and are backup targets,
   not cluster storage — see section 7.
+* **Memory (Sep 2026).** Both slots are now populated: the original 8 GB stick
+  in `DIMM1-ChannelB` plus an SK Hynix `HMA81GS6DJR8N-XN` (8 GB DDR4-3200,
+  1Rx8, non-ECC) in `DIMM3-ChannelA`. The 3200 parts downclock to the
+  platform's DDR4-2133; they were bought used because the 2026 DRAM shortage
+  put new 16 GB SODIMMs at €63–140. Allocatable went from 6.1/7.1 GiB to
+  13.9/15.0 GiB, and the pair also puts both nodes in dual-channel, which the
+  HD 530 shares bandwidth with.
+* **First boot after a DIMM change halts at POST.** These machines detect the
+  memory change and wait indefinitely at a "memory size has changed" prompt
+  for F1/Enter. With no monitor attached this looks exactly like a dead node —
+  no video, no ping, nothing in any log, because the OS never starts. Plug in
+  a keyboard and press Enter. Budget for it: the nodes were silent for ~20
+  minutes before anyone thought to.
+* `talosctl get memorymodules` reports populated slots, manufacturer and part
+  number without opening the case.
 * **VT-x is enabled** in the BIOS on both nodes, as KubeVirt requires.
 
 ### Control-plane topology
@@ -467,17 +482,13 @@ commits) and Loki alongside Grafana.
 
 ## 12. Known issues
 
-* **Memory.** Both nodes still run a single 8 GB SODIMM (one slot each is
-  empty), and sit at 82–95% memory. On 6 Sep 2026 the worker OOM-killed
-  Poseidon's `web` pod repeatedly (18 restarts against its 512 Mi limit — the
-  container runs a child `redis-server` that alone reaches ~460 MiB). Two
-  8 GB sticks are on the way; until then, treat anything memory-hungry as a
-  risk to its neighbours.
-* **Poseidon `web` needs either a larger limit or a smaller footprint.** See
-  above. Poseidon has since been scaled to zero, which removes the symptom but
-  not the cause: the limit is still 512 Mi and the child `redis-server` still
-  reaches ~460 MiB, so this has to be fixed before it is started again, not
-  after it starts OOM-looping a second time.
+* **Poseidon `web` needs either a larger limit or a smaller footprint.**
+  On 6 Sep 2026 the worker OOM-killed it repeatedly (18 restarts against its
+  512 Mi limit — the container runs a child `redis-server` that alone reaches
+  ~460 MiB). Poseidon is scaled to zero, which removes the symptom but not the
+  cause. The RAM upgrade does not fix this either: the kill was against the
+  container's own cgroup limit, not node exhaustion, so raising the limit (or
+  shrinking the process) is still required before it is started again.
 
 ---
 
