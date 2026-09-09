@@ -25,10 +25,6 @@ metadata:
   labels:
     app.kubernetes.io/name: devbox
     app.kubernetes.io/component: root-disk
-  annotations:
-    # Keep the importer pod around on failure so its logs can be read. Without
-    # this a failed import leaves nothing to look at.
-    cdi.kubevirt.io/storage.deleteAfterCompletion: "false"
 spec:
   source:
     http:
@@ -43,10 +39,26 @@ spec:
     resources:
       requests:
         storage: 60Gi
-    # Block, not Filesystem. CDI's StorageProfile for this class offers both;
-    # Block hands the guest a raw device with no host filesystem in the way,
-    # which is both faster and one less layer to corrupt.
-    volumeMode: Block
+    # Filesystem, not Block — and this is not the obvious choice, so:
+    #
+    # Block would hand the guest a raw LUN with no host filesystem in the way,
+    # which is faster and one less layer. CDI's StorageProfile even advertises
+    # it. It does not work here, and fails in a way worth writing down:
+    #
+    #   blockdev: cannot open /dev/cdi-block-volume: Permission denied
+    #
+    # The Synology CSI driver declares fsGroupPolicy: ReadWriteOnceWithFSType,
+    # so the kubelet only takes ownership of a volume that has a filesystem on
+    # it. A raw block device keeps its root ownership, and CDI's importer runs
+    # as uid 107 with every capability dropped, so it cannot open the device it
+    # was given. Nothing in the chain is misconfigured; the driver's policy and
+    # CDI's non-root importer are simply incompatible for Block volumes.
+    #
+    # Filesystem mode sidesteps it: the driver formats the LUN ext4, the
+    # kubelet applies fsGroup because there is now an fsType, and CDI writes a
+    # disk.img into it. CDI reserves 5.5% for filesystem overhead by default,
+    # so the guest sees roughly 56 GiB of the 60 below.
+    volumeMode: Filesystem
     accessModes:
       - ReadWriteOnce
     storageClassName: synology-csi-ssd
