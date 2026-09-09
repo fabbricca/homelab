@@ -20,5 +20,19 @@ resources:
   - cloudinit-secret.yaml
   - virtualmachine.yaml
   - service.yaml
-commonLabels:
-  app.kubernetes.io/managed-by: flux
+# `labels` with includeSelectors: false, not `commonLabels`.
+#
+# commonLabels adds its labels to the *selectors* of types kustomize
+# understands — and Service is one — but it cannot reach inside a CRD it does
+# not know, so VirtualMachine.spec.template.metadata.labels was left alone.
+# The result was a Service selecting on app.kubernetes.io/managed-by=flux and
+# a virt-launcher pod that never carried it: a Service with no endpoints, and
+# nothing anywhere reporting an error.
+#
+# This form labels the objects without touching any selector, so the Service
+# matches on vm.kubevirt.io/name alone — which is the label KubeVirt itself
+# guarantees on the launcher pod.
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: flux
+    includeSelectors: false
