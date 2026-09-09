@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: devbox
+# devbox — a Debian 13 VM on KubeVirt, existing to run Claude Code somewhere
+# that can reach this cluster and be driven from a phone over Remote Control.
+#
+# Three objects: a disk that outlives the VM, the VM, and a tailnet-only SSH
+# Service. Everything the guest installs is in the cloud-init block in
+# virtualmachine.yaml, so rebuilding the box from nothing is: delete the
+# DataVolume, let Flux recreate it.
+#
+# This is the first workload in the repository that is a VM rather than a
+# container, and the first use of the KubeVirt install from phase 6.
+resources:
+  # Disk first — the VM blocks on it anyway, but the ordering matches what a
+  # cold start actually does.
+  - datavolume.yaml
+  # What the guest installs on first boot. Plaintext on purpose; read its
+  # header before adding anything to it.
+  - cloudinit-secret.yaml
+  - virtualmachine.yaml
+  - service.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

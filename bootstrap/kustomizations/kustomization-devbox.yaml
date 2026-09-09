@@ -1,0 +1,31 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: devbox
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/devbox
+  prune: true
+  # The DataVolume pulls a ~324 MiB qcow2 over the internet and converts it
+  # onto a freshly provisioned iSCSI LUN before the VM can boot. On a cold
+  # cluster that is minutes, not seconds.
+  timeout: 20m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: namespace-devbox
+      namespace: flux-system
+    # CDI must exist to honour the DataVolume, and KubeVirt to honour the
+    # VirtualMachine. Without this Flux applies CRs whose CRDs may not be
+    # registered yet on a rebuild.
+    - name: kubevirt
+      namespace: flux-system
+    - name: synology-csi
+      namespace: flux-system
+  healthChecks:
+    - apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      name: devbox
+      namespace: devbox

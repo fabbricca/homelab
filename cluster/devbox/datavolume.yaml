@@ -1,0 +1,52 @@
+# The devbox's root disk.
+#
+# A standalone DataVolume rather than a `dataVolumeTemplates` entry in the
+# VirtualMachine, deliberately. A templated DataVolume is owned by the VM and
+# garbage-collected with it, so `kubectl delete vm devbox` — or a Flux prune
+# after a rename — would take the disk and everything installed on it. This
+# way the VM is disposable and the disk is not.
+#
+# CDI downloads the qcow2, converts it, and writes it to the PVC once; the
+# `import` completes and never runs again. Rebuilding the disk from scratch
+# means deleting this DataVolume, not editing it.
+#
+# Pinned to a dated Debian snapshot rather than `latest/`, which moves. The
+# SHA512 below is from the snapshot's SHA512SUMS and is recorded for a human
+# to verify — CDI v1.66 has no checksum field for HTTP sources, so nothing
+# here enforces it automatically.
+#
+#   sha512: 8ea9faae810043a0b35b0149f05014f26705c2339ffb11ead308f33e844a87cc
+#           3ef46ec81d5262b38817b6a88af404874d48a5857ebe072ef6a31dfb6e371f50
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: devbox-root
+  namespace: devbox
+  labels:
+    app.kubernetes.io/name: devbox
+    app.kubernetes.io/component: root-disk
+  annotations:
+    # Keep the importer pod around on failure so its logs can be read. Without
+    # this a failed import leaves nothing to look at.
+    cdi.kubevirt.io/storage.deleteAfterCompletion: "false"
+spec:
+  source:
+    http:
+      url: https://cloud.debian.org/images/cloud/trixie/20260831-2587/debian-13-genericcloud-amd64-20260831-2587.qcow2
+  storage:
+    # 60Gi against the ~479 GiB free on /volume1. The image's virtual size is
+    # a couple of gigabytes; cloud-init's growpart expands the root filesystem
+    # to fill this on first boot.
+    #
+    # Synology LUNs are thick, so this is claimed on the NAS the moment the
+    # PVC binds, not as it fills.
+    resources:
+      requests:
+        storage: 60Gi
+    # Block, not Filesystem. CDI's StorageProfile for this class offers both;
+    # Block hands the guest a raw device with no host filesystem in the way,
+    # which is both faster and one less layer to corrupt.
+    volumeMode: Block
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: synology-csi-ssd

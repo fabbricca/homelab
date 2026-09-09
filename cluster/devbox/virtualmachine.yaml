@@ -1,0 +1,104 @@
+# Debian 13 on KubeVirt, to run Claude Code where it can reach this cluster.
+#
+# The point is Remote Control: a session running here can be driven from a
+# phone. That connection is outbound to Anthropic from both ends, so this VM
+# needs no ingress, no Pangolin resource and no port-forward — the Service in
+# service.yaml exists only so a human can SSH in to set it up and debug.
+#
+# Why a VM and not a pod: the workload is "a machine someone tinkers on from
+# a phone". Installing a tool you did not anticipate should be apt-get, not a
+# new container image and a commit. It also finally puts the ~900 MiB the
+# KubeVirt control plane has been costing since phase 6 to some use.
+#
+# Why it can run here at all: as of Sep 2026 both nodes have 16 GB. Before
+# that the whole cluster had 8 GB per node and a 4 GiB guest was out of the
+# question — see the hardware note in the README.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: devbox
+  namespace: devbox
+  labels:
+    app.kubernetes.io/name: devbox
+spec:
+  # Always: this is a workstation, it should come back after a node reboot
+  # without anyone asking. Stop it with `virtctl stop devbox`, which sets
+  # runStrategy to Halted via the subresource rather than fighting Flux.
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: devbox
+        # What service.yaml selects on. KubeVirt copies these onto the
+        # virt-launcher pod.
+        vm.kubevirt.io/name: devbox
+    spec:
+      # Deliberately unpinned, unlike immich-server. The root disk is RWO
+      # iSCSI so the VM can only ever be in one place at a time anyway, and
+      # nothing here has to be co-located with a node-local disk. Either node
+      # now has the memory for it.
+      domain:
+        cpu:
+          # Four cores against four physical, overcommitted on purpose: the
+          # nodes idle at ~10% CPU and this is an interactive box that wants
+          # burst, not a reservation.
+          cores: 4
+          # host-model, not host-passthrough. Passthrough would expose every
+          # Skylake feature and pin the guest to this exact CPU; host-model
+          # gets essentially the same performance while leaving the guest
+          # bootable on the other node.
+          model: host-model
+        memory:
+          guest: 4Gi
+        resources:
+          requests:
+            # KubeVirt adds its own overhead on top of the guest allocation
+            # for virt-launcher and QEMU; this is the floor for scheduling.
+            memory: 4Gi
+            cpu: 500m
+          limits:
+            memory: 5Gi
+            cpu: "4"
+        devices:
+          disks:
+            - name: root
+              disk:
+                bus: virtio
+              bootOrder: 1
+            - name: cloudinit
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              # masquerade puts the guest behind NAT on the pod's IP, which
+              # is what makes a plain ClusterIP Service work against it.
+              masquerade: {}
+              ports:
+                - name: ssh
+                  port: 22
+          # Without a virtio-rng the guest drains the kernel entropy pool and
+          # anything doing crypto — TLS, ssh-keygen, npm over https — blocks
+          # for a long time on first boot.
+          rng: {}
+        machine:
+          type: q35
+      networks:
+        - name: default
+          pod: {}
+      # 180s: Debian's first boot runs cloud-init through an apt update, a
+      # package install and three binary downloads before it is useful. The
+      # 30s default would have the guest declared unresponsive mid-install.
+      terminationGracePeriodSeconds: 180
+      volumes:
+        - name: root
+          dataVolume:
+            name: devbox-root
+        - name: cloudinit
+          cloudInitNoCloud:
+            # A Secret rather than inline: KubeVirt rejects inline userData
+            # over 2048 bytes. See the header of cloudinit-secret.yaml for why
+            # that Secret is not SOPS-encrypted.
+            # The Secret's key must be `userdata`; KubeVirt looks for exactly
+            # that name and silently boots an unconfigured guest otherwise.
+            secretRef:
+              name: devbox-cloudinit

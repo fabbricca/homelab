@@ -1,0 +1,36 @@
+# SSH to the devbox, over the tailnet only.
+#
+# Same mechanism Headlamp and Grafana use: the Tailscale operator watches for
+# this annotation, runs a proxy StatefulSet in the tailscale namespace, and
+# publishes the Service at devbox.<tailnet>.ts.net. No auth key is needed —
+# the operator authenticates with its own OAuth client — and no DNS setup is
+# needed on any client, because MagicDNS resolves it everywhere.
+#
+# This is not how Claude Code Remote Control reaches Anthropic. That is
+# outbound from inside the guest and needs nothing here; this Service exists
+# so a human can get a shell to set the box up, log Claude Code in the first
+# time, and debug it later.
+#
+# Deliberately not a Pangolin resource and never on the public Gateway: the
+# whole point of this machine is that it will eventually hold a kubeconfig.
+apiVersion: v1
+kind: Service
+metadata:
+  name: devbox
+  namespace: devbox
+  labels:
+    app.kubernetes.io/name: devbox
+  annotations:
+    tailscale.com/expose: "true"
+    # Without this the tailnet name would be devbox-devbox.
+    tailscale.com/hostname: devbox
+spec:
+  type: ClusterIP
+  selector:
+    # KubeVirt stamps this onto the virt-launcher pod from the VM template.
+    vm.kubevirt.io/name: devbox
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: 22
+      protocol: TCP
