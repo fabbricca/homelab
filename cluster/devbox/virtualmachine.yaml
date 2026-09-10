@@ -49,15 +49,21 @@ spec:
           # bootable on the other node.
           model: host-model
         memory:
-          guest: 4Gi
+          # 6Gi, raised from 4Gi when project_dembe moved onto this box.
+          # Its Dockerfile is explicit that ns-3 translation units peak at
+          # 1-2 GB each and that ~4 GB of available RAM "invites the OOM
+          # killer, which surfaces as a mangled link error rather than an
+          # out-of-memory message" — and the test suites add ASan on top of
+          # that. 6Gi leaves the worker roughly 4.9 GiB for everything else.
+          guest: 6Gi
         resources:
           requests:
             # KubeVirt adds its own overhead on top of the guest allocation
             # for virt-launcher and QEMU; this is the floor for scheduling.
-            memory: 4Gi
+            memory: 6Gi
             cpu: 500m
           limits:
-            memory: 5Gi
+            memory: 7Gi
             cpu: "4"
         devices:
           disks:
