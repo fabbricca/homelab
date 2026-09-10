@@ -79,6 +79,26 @@ spec:
               # masquerade puts the guest behind NAT on the pod's IP, which
               # is what makes a plain ClusterIP Service work against it.
               masquerade: {}
+              # Pinned, and it has to be.
+              #
+              # KubeVirt generates a fresh random MAC for every VMI when this
+              # is unset, and cloud-init writes the guest's network config
+              # matched on the MAC it saw at first boot. So the first time the
+              # VMI is recreated — a node drain, a spec change, `virtctl
+              # restart` — the guest comes up with a NIC its own config does
+              # not recognise, silently gets no DHCP lease, and is off the
+              # network. The VM still reports Running and the guest agent still
+              # connects, which makes it look like sshd died rather than a
+              # network that was never configured.
+              #
+              # Observed exactly that on the 4Gi -> 6Gi change: 3a:75:de:89:0f:c2
+              # became d6:b0:e5:d4:8f:84 and enp1s0 came up with no address.
+              #
+              # Locally-administered unicast address (0x02 in the first octet),
+              # so it cannot collide with real hardware. Only ever visible
+              # inside the launcher's network namespace anyway, because
+              # masquerade NATs it.
+              macAddress: "02:00:de:eb:00:01"
               ports:
                 - name: ssh
                   port: 22
