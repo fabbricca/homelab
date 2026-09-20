@@ -12,6 +12,11 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
+  # For the status-badges gist token.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
   dependsOn:
     - name: fossorial-helm-repo
       namespace: flux-system

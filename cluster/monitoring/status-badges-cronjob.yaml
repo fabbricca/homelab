@@ -1,0 +1,72 @@
+# See status-badges-script.yaml for what this publishes and why it is safe.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: status-badges
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: status-badges
+spec:
+  # Every 10 minutes. INTERVAL_SECONDS below must match: the availability
+  # figure is "samples present / samples expected", and expected is derived
+  # from this interval.
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A run that could not start within its slot is a missed sample, which is
+  # exactly what the availability figure should record. Do not catch up.
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: status-badges
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: publish
+              image: python:3.13-alpine@sha256:1a63a53928ce53d2b0baf08092a703f4840ac5dfbd61fd48802dbf48e08c801e
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              command: ["python3", "-u", "/app/publish.py"]
+              env:
+                - name: PROMETHEUS_URL
+                  value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+                - name: INTERVAL_SECONDS
+                  value: "600"
+                - name: WINDOW_SECONDS
+                  value: "2592000"  # 30 days
+                - name: GIST_ID
+                  valueFrom:
+                    secretKeyRef: { name: status-badges, key: GIST_ID }
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef: { name: status-badges, key: GITHUB_TOKEN }
+              volumeMounts:
+                - name: script
+                  mountPath: /app
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+          volumes:
+            - name: script
+              configMap:
+                name: status-badges-script

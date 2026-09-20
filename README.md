@@ -3,6 +3,16 @@
 GitOps-managed Talos + Flux + Cilium cluster running self-hosted services on
 low-power recycled hardware.
 
+[![nodes](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/nodes.json)](#2-hardware)
+[![availability](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/availability.json)](#live-status)
+[![pods](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/pods.json)](#live-status)
+[![cpu](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/cpu.json)](#live-status)
+[![memory](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/memory.json)](#live-status)
+[![cluster age](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/age.json)](#live-status)
+[![talos](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/talos.json)](#4-provisioning)
+[![kubernetes](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/kubernetes.json)](#4-provisioning)
+[![updated](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/fabbricca/11e59a5e3535b1c94aed6b1f75c075b6/raw/updated.json)](#live-status)
+
 ---
 
 ## 1. Overview
@@ -448,6 +458,39 @@ subnet from anywhere.
 | Node extensions | `talosctl get extensions` |
 | Extension configs | `talosctl get extensionserviceconfigs` |
 | UPS client state | `talosctl service ext-nut-client` |
+
+### Live status
+
+The badges at the top of this page are pushed, not pulled. A CronJob in
+`cluster/monitoring/` (`status-badges-*.yaml`) queries Prometheus every ten
+minutes and PATCHes a handful of shields.io endpoint JSON files into a GitHub
+Gist; the README embeds them via `img.shields.io/endpoint`. The cluster reaches
+out to `api.github.com` and nothing reaches in, which keeps the rule in
+section 9 intact — no metrics endpoint is exposed anywhere.
+
+What leaves the cluster is aggregates only: node and pod counts, CPU and memory
+percentages, cluster age, and the Talos and Kubernetes versions, which are in
+this repo anyway. No hostnames, IPs, kernel versions, or versions of the
+publicly exposed applications.
+
+**Availability** is measured rather than self-reported. Each run appends its
+timestamp to `history.json` in the gist and drops anything older than 30 days.
+A cluster that is down writes nothing, so the figure is samples present over
+samples expected — the uptime of "the cluster can schedule a job and reach the
+internet". Prometheus only keeps 7 days, which is why the history lives in the
+gist. Until 30 days of samples exist the window starts at the first sample, so
+the number is honest from day one instead of climbing towards 100%.
+
+Why not raw node uptime: Talos upgrades reboot the node, so a large uptime
+number on this cluster would mean a long time without an OS upgrade.
+
+Setup, once: the gist was created with `gh gist create history.json` and its
+id is in the badge URLs above. The token is a personal access token whose only
+permission is Gists (read/write) — GitHub issues those from the web UI only,
+there is no API for it. Both live in
+`cluster/monitoring/status-badges-secret.yaml`, encrypted with `sops -e -i`.
+When the token expires the badges go stale and the `updated` one says so —
+that is the intended failure mode.
 
 ### Rebuilding from scratch
 

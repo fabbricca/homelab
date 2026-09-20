@@ -1,0 +1,130 @@
+# Publishes a few aggregate cluster numbers to a GitHub Gist, which the README
+# renders as shields.io badges. Push-only: the cluster reaches out to GitHub,
+# nothing reaches in, so this adds no listener to the tunnel or to Tailscale.
+#
+# Only aggregates leave the cluster — counts, percentages, platform versions
+# that are in this repo anyway. No node names, IPs, kernel versions or
+# versions of the publicly exposed apps.
+#
+# Availability is measured, not self-reported: every run appends a timestamp
+# to history.json in the gist. A cluster that is down writes nothing, so the
+# ratio of samples present to samples expected over the window is the uptime
+# of "the cluster can run a job and reach the internet". Prometheus keeps 7
+# days; the gist is what makes a 30-day figure possible.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: status-badges-script
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: status-badges
+data:
+  publish.py: |
+    import json
+    import os
+    import sys
+    import time
+    import urllib.parse
+    import urllib.request
+
+    PROM = os.environ["PROMETHEUS_URL"]
+    GIST_ID = os.environ["GIST_ID"]
+    TOKEN = os.environ["GITHUB_TOKEN"]
+    INTERVAL = int(os.environ["INTERVAL_SECONDS"])
+    WINDOW = int(os.environ["WINDOW_SECONDS"])
+
+    NOW = int(time.time())
+
+
+    def query(expr):
+        """Instant query; returns the first sample's (labels, float value)."""
+        url = PROM + "/api/v1/query?" + urllib.parse.urlencode({"query": expr})
+        with urllib.request.urlopen(url, timeout=30) as r:
+            result = json.load(r)["data"]["result"]
+        if not result:
+            raise RuntimeError(f"no data for {expr!r}")
+        return result[0]["metric"], float(result[0]["value"][1])
+
+
+    def gist(method, body=None):
+        req = urllib.request.Request(
+            f"https://api.github.com/gists/{GIST_ID}",
+            method=method,
+            data=json.dumps(body).encode() if body else None,
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+
+
+    def badge(label, message, color="informational"):
+        # https://shields.io/badges/endpoint-badge
+        return {"schemaVersion": 1, "label": label, "message": message, "color": color}
+
+
+    # --- gather --------------------------------------------------------------
+
+    _, ready = query('sum(kube_node_status_condition{condition="Ready",status="true"})')
+    _, total = query("count(kube_node_info)")
+    _, pods = query('sum(kube_pod_status_phase{phase="Running"})')
+    _, cpu = query('avg(1 - rate(node_cpu_seconds_total{mode="idle"}[24h]))')
+    _, mem = query(
+        "sum(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)"
+        " / sum(node_memory_MemTotal_bytes)"
+    )
+    _, created = query("min(kube_node_created)")
+    info, _ = query("kube_node_info")
+    talos = info["os_image"].removeprefix("Talos (").removesuffix(")")
+    kubernetes = info["kubelet_version"]
+
+    # --- availability --------------------------------------------------------
+
+    current = gist("GET")
+    try:
+        history = json.loads(current["files"]["history.json"]["content"])
+    except (KeyError, ValueError):
+        history = []
+    history = [t for t in history if t > NOW - WINDOW] + [NOW]
+
+    # Until the window is full, measure from the first sample we have, so the
+    # figure is honest from day one rather than climbing towards 100%.
+    span = NOW - max(history[0], NOW - WINDOW)
+    expected = span // INTERVAL + 1
+    availability = min(len(history) / expected, 1.0) * 100
+
+    # --- publish -------------------------------------------------------------
+
+    badges = {
+        "nodes.json": badge(
+            "nodes",
+            f"{int(ready)}/{int(total)} ready",
+            "success" if ready == total else "critical",
+        ),
+        "availability.json": badge(
+            "availability (30d)",
+            f"{availability:.2f}%",
+            "success" if availability >= 99 else "important" if availability >= 95 else "critical",
+        ),
+        "pods.json": badge("pods", f"{int(pods)} running"),
+        "cpu.json": badge("cpu (24h avg)", f"{cpu * 100:.0f}%"),
+        "memory.json": badge("memory", f"{mem * 100:.0f}%"),
+        "age.json": badge("cluster age", f"{int((NOW - created) // 86400)} days"),
+        "talos.json": badge("talos", talos),
+        "kubernetes.json": badge("kubernetes", kubernetes),
+        "updated.json": badge(
+            "updated", time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(NOW)), "lightgrey"
+        ),
+    }
+
+    files = {name: {"content": json.dumps(b)} for name, b in badges.items()}
+    files["history.json"] = {"content": json.dumps(history, separators=(",", ":"))}
+    gist("PATCH", {"files": files})
+
+    for name, b in badges.items():
+        print(f"{name}: {b['label']} = {b['message']}")
+    print(f"history: {len(history)} samples, {expected} expected", file=sys.stderr)
