@@ -43,7 +43,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: jellyfin
-        image: jellyfin/jellyfin@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db  # 10.11.11
+        image: jellyfin/jellyfin@sha256:baba630419915985442f315f08b0cf46d9f4c8a0cc4bd38e94a6d35751dd5ef5  # 12.0.20260908-012347
         imagePullPolicy: Always
         ports:
         - containerPort: 8096
@@ -93,11 +93,21 @@ spec:
             # decode — no AV1, no HEVC 10-bit encode. Enable VAAPI in
             # Jellyfin's own playback settings; this only grants the device.
             gpu.intel.com/i915: "1"
+        # A major upgrade rewrites the database on first boot, which can run
+        # well past the liveness budget. Killing the pod mid-migration risks
+        # leaving the database half-rewritten, so give startup up to 30
+        # minutes before liveness takes over.
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8096
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 90
         livenessProbe:
           httpGet:
             path: /health
             port: 8096
-          initialDelaySeconds: 60
           periodSeconds: 20
           timeoutSeconds: 5
       volumes:
