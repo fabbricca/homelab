@@ -22,7 +22,7 @@ data:
     public-resources:
       awaken:
         name: awaken
-        mode: http
+        protocol: http
         full-domain: awaken.iberu.me
         ssl: true
         targets:
@@ -31,7 +31,7 @@ data:
             port: 80
       wger:
         name: wger
-        mode: http
+        protocol: http
         full-domain: wger.iberu.me
         ssl: true
         targets:
