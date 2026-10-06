@@ -185,6 +185,16 @@ data:
     # correctly". So the public hostname is pinned to https. Requests to the
     # in-cluster Service name (AWAKEN's wger sync) keep their real scheme, so the
     # links they get back stay reachable inside the cluster.
+    # The Android app searches ingredients in the phone's language only (plus an
+    # optional "all languages" toggle buried in the search screen). The phone is in
+    # English but the food is Italian, so every name search came back without the
+    # Italian products. Widen English-only ingredient searches to English + Italian;
+    # wger's language__code filter takes a comma-separated list.
+    map $args $ingredient_args {
+        "~^(?<pre>.*)language__code=en(?<post>&.*)?$" "${pre}language__code=en,it${post}";
+        default $args;
+    }
+
     map $host $final_forwarded_proto {
         wger.iberu.me https;
         default       $upstream_forwarded_proto;
@@ -198,6 +208,15 @@ data:
 
         # Increase max body size to allow for video and gallery uploads.
         client_max_body_size 100M;
+
+        location ~ ^/api/v2/(ingredientinfo|ingredient)/$ {
+            proxy_pass http://127.0.0.1:8000$uri?$ingredient_args;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $http_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $final_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $http_host;
+        }
 
         location / {
             # Changed: gunicorn is in the same pod, so localhost.
