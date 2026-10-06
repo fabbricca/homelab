@@ -434,7 +434,6 @@ Two separate paths, deliberately:
 | Jellyfin | Public | newt → Pangolin tunnel → Cilium Gateway |
 | Poseidon | Public — **stopped** | newt → Pangolin tunnel → Cilium Gateway |
 | Immich | Public | newt → Pangolin tunnel → Cilium Gateway |
-| wger | Public | newt → Pangolin tunnel → Cilium Gateway |
 | AWAKEN | Public | newt → Pangolin tunnel → Cilium Gateway |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
 
