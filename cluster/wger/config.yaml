@@ -171,9 +171,23 @@ data:
             '"user_agent":"$http_user_agent"'
         '}';
 
-    map $http_x_forwarded_proto $final_forwarded_proto {
+    map $http_x_forwarded_proto $upstream_forwarded_proto {
         default $http_x_forwarded_proto;
         ''      $scheme;
+    }
+
+    # wger.iberu.me is only ever reached over TLS (Pangolin at the edge, the
+    # Gateway's :443 listener on the LAN), but the hop that arrives here is plain
+    # HTTP: newt forwards to the Gateway's :80 listener and Envoy rewrites
+    # X-Forwarded-Proto to "http". wger then built http:// pagination links, and
+    # the Android app (2.1+) compares the API's `next` URL with its server URL and
+    # shows "Server misconfiguration detected, headers are not being passed
+    # correctly". So the public hostname is pinned to https. Requests to the
+    # in-cluster Service name (AWAKEN's wger sync) keep their real scheme, so the
+    # links they get back stay reachable inside the cluster.
+    map $host $final_forwarded_proto {
+        wger.iberu.me https;
+        default       $upstream_forwarded_proto;
     }
 
     server {
