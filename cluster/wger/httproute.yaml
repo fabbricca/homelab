@@ -1,0 +1,56 @@
+# Attaches to the shared Gateway in cluster/gateway/. Pangolin terminates TLS
+# at the edge and newt forwards plain HTTP to the Gateway's :80 listener, so
+# the hostname here is what makes the Pangolin resource for wger.iberu.me
+# land on this application. The :443 listener serves the same route directly
+# from the LAN using the wildcard certificate.
+#
+# Public rather than Tailscale-only, for the same reason as immich: the point
+# is that a workout logged in a gym basement syncs over mobile data without
+# anyone thinking about it. wger's own accounts are the access control —
+# registration is off in config.yaml, logins are rate-limited by django-axes —
+# and the first-boot `admin` password must be changed before the Pangolin
+# resource is created (see the end of web.yaml).
+#
+# Everything goes to the nginx sidecar in wger-web, which splits static and
+# media files, the /ps/ sync endpoint and the application itself. Two rules
+# only because the two kinds of traffic want different timeouts.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wger
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - wger.iberu.me
+  rules:
+    # PowerSync's sync stream: one response the phone holds open for as long
+    # as the app is in the foreground. Envoy's 15s default would cut it off
+    # every fifteen seconds, so no timeout at all, as for jellyfin's streams.
+    #
+    # The matching concern on the other side of the tunnel is Pangolin's: the
+    # stream only works if the edge passes the response through as it
+    # arrives rather than buffering it. If the app logs in but its lists
+    # stay empty while /ps/ requests show 200 in the nginx log, look there.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /ps/
+      backendRefs:
+        - name: wger-web
+          port: 8080
+      timeouts:
+        request: 0s
+    - backendRefs:
+        - name: wger-web
+          port: 8080
+      timeouts:
+        # Long enough for a gallery photo uploaded over a phone's upstream,
+        # and just past gunicorn's own 240s worker timeout, so a slow
+        # request fails in gunicorn with a log line rather than silently in
+        # Envoy.
+        request: 300s

@@ -19,5 +19,9 @@ resources:
   # Per-platform database provisioning:
   - keycloak-db-secret.yaml
   - keycloak-provision-job.yaml
+  - wger-db-secret.yaml
+  - wger-provision-job.yaml
+  - awaken-db-secret.yaml
+  - awaken-provision-job.yaml
 commonLabels:
   app.kubernetes.io/managed-by: flux

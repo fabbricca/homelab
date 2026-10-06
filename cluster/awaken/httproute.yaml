@@ -1,0 +1,24 @@
+# Public, like immich: the phone talks to it over mobile data, and Claude clients
+# reach /mcp from anywhere. Access control is the API's own: Keycloak tokens for the
+# app, personal `awk_` tokens for MCP clients and scripts. Nothing is anonymous
+# except /healthz.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: awaken
+  namespace: awaken
+  labels:
+    app.kubernetes.io/name: awaken
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - awaken.iberu.me
+  rules:
+    - backendRefs:
+        - name: awaken
+          port: 8000
+      timeouts:
+        # The in-app coach waits on an LLM through a multi-step tool loop.
+        request: 120s

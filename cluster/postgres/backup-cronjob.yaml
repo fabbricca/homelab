@@ -4,6 +4,14 @@
 # well, so a restore does not need the provisioning Jobs re-run first. Keycloak
 # lives in this instance now, so its realms, clients and users are covered here
 # too — that was a large part of the reason for moving it off H2.
+#
+# wger is covered the same way: its workouts, logs and measurements, its
+# ingredient table, and the `powersync` schema that PowerSync keeps as a cache
+# beside them. After restoring wger from one of these dumps, drop PowerSync's
+# replication slot before starting it again — the slot points at a WAL
+# position the restored instance has never seen:
+#   SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots
+#    WHERE slot_name LIKE 'powersync_%';
 apiVersion: batch/v1
 kind: CronJob
 metadata:

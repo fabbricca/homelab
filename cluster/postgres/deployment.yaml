@@ -26,6 +26,27 @@ spec:
           # same instance. Kept for the latter (e.g. Immich).
           image: pgvector/pgvector:pg17
           imagePullPolicy: IfNotPresent
+          # wal_level=logical is for wger's PowerSync service, which streams
+          # changes out of the wger database through a logical replication
+          # slot (cluster/wger/powersync.yaml). It only writes a little more
+          # WAL than the default `replica`, and it is per-instance: there is
+          # no way to enable it for one database. Changing it needs a restart,
+          # which this Deployment's Recreate strategy does on rollout —
+          # Keycloak is unavailable for those few seconds.
+          #
+          # max_slot_wal_keep_size is the guard that comes with it. A
+          # replication slot pins WAL until its consumer confirms it, so a
+          # PowerSync that is down — or scaled to zero and forgotten — would
+          # otherwise grow pg_wal until it fills this 20 GiB volume and takes
+          # Keycloak down with it. Capped, Postgres invalidates the slot
+          # instead; PowerSync notices and re-snapshots from scratch, and the
+          # phones silently re-sync. Losing a cache is the right trade.
+          args:
+            - postgres
+            - -c
+            - wal_level=logical
+            - -c
+            - max_slot_wal_keep_size=2GB
           ports:
             - name: postgres
               containerPort: 5432

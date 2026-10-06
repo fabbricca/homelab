@@ -1,0 +1,20 @@
+# wger — self-hosted workout, nutrition and body-measurement tracker.
+#
+# Enforces `restricted`, like immich. Every container here starts directly as
+# a non-root user with no privileged setup: the wger image ships a `wger` user
+# at uid 1000, nginx-unprivileged runs as 101, PowerSync as 901, and Valkey is
+# started as uid 999. The database is the shared instance in cluster/postgres/,
+# so the root-then-gosu Postgres entrypoint that pushes media and poseidon
+# down to `baseline` never runs in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wger
+  labels:
+    app.kubernetes.io/name: wger
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest

@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: awaken
+# AWAKEN — one stateless Deployment: the REST API, the MCP coach endpoint (/mcp) and
+# the scheduler that issues Daily Quests, judges days and weeks, nags reminders,
+# syncs wger and watches the PhD job portals.
+#
+# Stateless on purpose. Every byte of game state and every Operation Liftoff
+# document lives in the `awaken` database on the shared Postgres, so the nightly
+# pg_dumpall in cluster/postgres/ is the whole backup story and deleting this
+# namespace loses nothing.
+resources:
+  - secret.yaml
+  - deployment.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

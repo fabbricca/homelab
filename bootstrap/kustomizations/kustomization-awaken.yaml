@@ -1,0 +1,30 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: awaken
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/awaken
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  dependsOn:
+    - name: namespace-awaken
+      namespace: flux-system
+    - name: gateway
+      namespace: flux-system
+    # The database and role are created by the provisioning Job in cluster/postgres/.
+    - name: postgres
+      namespace: flux-system
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: awaken
+      namespace: awaken

@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: awaken
+  namespace: awaken
+  labels:
+    app.kubernetes.io/name: awaken
+spec:
+  selector:
+    app.kubernetes.io/name: awaken
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: awaken
+  namespace: awaken
+  labels:
+    app.kubernetes.io/name: awaken
+spec:
+  # Exactly one replica, and Recreate: the in-process scheduler is the System's
+  # clock. Its jobs are idempotent, so a brief overlap would not double-pay
+  # anything, but two clocks would race on the same job_run rows for no benefit.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: awaken
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: awaken
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      # Schema migrations run once per rollout, before the server starts, so the
+      # API never sees a half-migrated database.
+      initContainers:
+        - name: migrate
+          image: fabbricca/awaken@sha256:1e8bfcef22fefb5d98ae3d3fe67bbb49885c3e0e98dca32fd1a208ddc4936b64  # 0.1.0
+          imagePullPolicy: IfNotPresent
+          command: ["awaken", "migrate"]
+          envFrom:
+            - secretRef:
+                name: awaken
+          securityContext: &restricted
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: awaken
+          image: fabbricca/awaken@sha256:1e8bfcef22fefb5d98ae3d3fe67bbb49885c3e0e98dca32fd1a208ddc4936b64  # 0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: awaken
+          env:
+            - name: TZ
+              value: Europe/Rome
+            - name: AWAKEN_PUBLIC_URL
+              value: https://awaken.iberu.me
+            # Keycloak, realm homelab. Create a public client `awaken` there (PKCE)
+            # for the Flutter app; the API checks the token's audience.
+            - name: AWAKEN_OIDC_ISSUER
+              value: https://keycloak.iberu.me/realms/homelab
+            - name: AWAKEN_OIDC_AUDIENCE
+              value: awaken
+            - name: AWAKEN_NTFY_URL
+              value: https://ntfy.sh
+          securityContext: *restricted
+          resources:
+            requests:
+              cpu: 50m
+              memory: 160Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

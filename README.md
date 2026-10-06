@@ -375,6 +375,7 @@ Three things run nightly, deliberately landing on three different disks:
 |------|------|-------|------|
 | `pg_dumpall` of the shared Postgres | 03:15 | `/volume2/HDD/postgres-backups` | NAS HDD |
 | `pg_dumpall` of Immich's Postgres | 03:45 | `/volume2/HDD/immich-db-backups` | NAS HDD |
+| tar of wger's user uploads (gallery) | 04:15 | `/volume2/HDD/wger-media-backups` | NAS HDD |
 | restic of the Immich library | 04:30 | `/var/mnt/backup` on the worker | node SATA |
 
 The databases live on the NAS SSD and are dumped to the NAS HDD, so losing
@@ -433,6 +434,8 @@ Two separate paths, deliberately:
 | Jellyfin | Public | newt → Pangolin tunnel → Cilium Gateway |
 | Poseidon | Public — **stopped** | newt → Pangolin tunnel → Cilium Gateway |
 | Immich | Public | newt → Pangolin tunnel → Cilium Gateway |
+| wger | Public | newt → Pangolin tunnel → Cilium Gateway |
+| AWAKEN | Public | newt → Pangolin tunnel → Cilium Gateway |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
 
 Poseidon is scaled to zero (`cluster/poseidon/`, every Deployment at

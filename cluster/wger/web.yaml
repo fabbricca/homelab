@@ -1,0 +1,270 @@
+# wger-web: gunicorn, the nginx sidecar that serves static and media files,
+# and the celery worker, all in one pod.
+#
+# Three containers where upstream's compose file has three services, for one
+# reason: wger-media is a RWO iSCSI volume and both gunicorn (user uploads)
+# and the worker (exercise and ingredient images it downloads) write to it.
+# As separate Deployments the scheduler is free to put them on different
+# nodes, and whichever starts second sits in ContainerCreating with a
+# Multi-Attach error. Poseidon can split its worker out because its workers
+# share nothing but Postgres and Redis; this one shares a disk. The nginx
+# sidecar needs the same volume, read-only, for the same reason.
+#
+# Celery beat is NOT in here — it needs no volume, and must never run twice,
+# so it keeps a Deployment of its own (beat.yaml).
+#
+# Image: wger/server 2.7, the release the current Android app requires
+# (MIN_SERVER_VERSION = '2.7' in wger-project/flutter).
+apiVersion: v1
+kind: Service
+metadata:
+  name: wger-web
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: web
+  ports:
+    # nginx, not gunicorn: static files, media and the /ps/ sync endpoint
+    # all live behind it.
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wger-web
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  # Recreate, for the same two reasons as immich-server: wger-media is RWO,
+  # so a surge pod on the other node deadlocks on Multi-Attach; and the
+  # entrypoint runs migrations on start, so two versions must never be live
+  # against the same database at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wger
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wger
+        app.kubernetes.io/component: web
+    spec:
+      automountServiceAccountToken: false
+      # Upstream's `stop_grace_period: 60s`: gunicorn finishes in-flight
+      # requests on SIGTERM, and a gallery upload over mobile data is slow.
+      terminationGracePeriodSeconds: 60
+      # uid 1000 is the `wger` user the image ships and builds its tree as.
+      # fsGroup makes the freshly provisioned media LUN writable to it.
+      # OnRootMismatch so that a volume full of exercise images is not
+      # recursively chowned on every restart.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: docker.io/wger/server@sha256:1c5789b93bfe5eed0b7287255782d9177027b255de2b22b59f511a693a48db04  # 2.7
+          imagePullPolicy: IfNotPresent
+          # The image's own entrypoint.sh, unchanged: `wger bootstrap` (which
+          # migrates, loads fixtures and creates the admin user on an empty
+          # database), collectstatic, migrate, set-site-url, then gunicorn on
+          # :8000.
+          ports:
+            - name: gunicorn
+              containerPort: 8000
+          envFrom:
+            - configMapRef: { name: wger-config }
+            - secretRef:    { name: wger-app }
+            - secretRef:    { name: wger-database }
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Read-only works: tested against this exact image with only the
+            # mounts below writable. Python bytecode is not written
+            # (PYTHONDONTWRITEBYTECODE=1 in the image), translations are
+            # compiled at build time, and gunicorn's control socket is turned
+            # off in GUNICORN_CMD_ARGS.
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: media
+              mountPath: /home/wger/media
+            # collectstatic's target, rebuilt on every start so it always
+            # matches the image. nginx serves it from the same emptyDir.
+            - name: static
+              mountPath: /home/wger/static
+            - name: tmp-web
+              mountPath: /tmp
+          resources:
+            requests: { memory: "384Mi", cpu: "100m" }
+            # Two --preload'ed gthread workers sit around 300-400 MiB. The
+            # headroom is for the manual first ingredient import (see the
+            # end of this file), which runs in this container.
+            limits:   { memory: "1Gi", cpu: "1500m" }
+          # First start on an empty database migrates, loads the fixtures and
+          # collects ~11k static files before the port opens; on this
+          # hardware that is minutes, not seconds. Ten minutes of budget so
+          # liveness never kills it halfway through a migration.
+          startupProbe:
+            httpGet:
+              path: /api/v2/version/
+              port: gunicorn
+            periodSeconds: 10
+            failureThreshold: 60
+          # Upstream's own health check: a GET on the version endpoint, which
+          # is cheap and touches neither the cache nor the database.
+          readinessProbe:
+            httpGet:
+              path: /api/v2/version/
+              port: gunicorn
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v2/version/
+              port: gunicorn
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+        - name: nginx
+          image: docker.io/nginxinc/nginx-unprivileged@sha256:d715f7a85cdfea820fec743ea5aee8a22f91e00ff310ad6275d2638112d8cf8d  # 1.30.5 (stable)
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            # The unprivileged image's own user. Reads the media and static
+            # files through world-readable modes (Django writes 0644), and the
+            # pod's fsGroup covers anything that is not.
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            # The image keeps its pid file and every temp path under /tmp.
+            # Its entrypoint's IPv6 helper finds conf.d read-only and skips.
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: static
+              mountPath: /wger/static
+              readOnly: true
+            - name: media
+              mountPath: /wger/media
+              readOnly: true
+            - name: tmp-nginx
+              mountPath: /tmp
+          resources:
+            requests: { memory: "16Mi", cpu: "10m" }
+            limits:   { memory: "128Mi", cpu: "500m" }
+          # Through nginx to gunicorn, so the pod only takes traffic once
+          # both halves answer — nginx alone comes up long before the static
+          # files it is meant to serve exist.
+          readinessProbe:
+            httpGet:
+              path: /api/v2/version/
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 30
+
+        - name: worker
+          image: docker.io/wger/server@sha256:1c5789b93bfe5eed0b7287255782d9177027b255de2b22b59f511a693a48db04  # 2.7
+          imagePullPolicy: IfNotPresent
+          # Upstream's start script: `celery --app wger worker --pool=gevent
+          # --concurrency=$CELERY_WORKER_CONCURRENCY`. Runs the weekly
+          # exercise and monthly ingredient syncs, ingredient image fetches,
+          # trophy and statistics updates, and outgoing email.
+          command: ["/start-worker"]
+          envFrom:
+            - configMapRef: { name: wger-config }
+            - secretRef:    { name: wger-app }
+            - secretRef:    { name: wger-database }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: media
+              mountPath: /home/wger/media
+            - name: tmp-worker
+              mountPath: /tmp
+          resources:
+            requests: { memory: "256Mi", cpu: "50m" }
+            # The monthly ingredient sync streams a ~400 MB dump through this
+            # container; the steady state is a fraction of this.
+            limits:   { memory: "1Gi", cpu: "1" }
+          livenessProbe:
+            exec:
+              # Wrapped in a shell for $(hostname), as in poseidon's worker:
+              # the kubelet does not expand it in an exec probe.
+              command:
+                - sh
+                - -c
+                - celery -A wger inspect ping -d "celery@$(hostname)"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: wger-media
+        - name: static
+          emptyDir: {}
+        - name: nginx-conf
+          configMap:
+            name: wger-nginx
+        # The two wger containers each get a /tmp large enough for the
+        # ingredient dump, which is downloaded there before it is imported.
+        - name: tmp-web
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp-worker
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp-nginx
+          emptyDir: {}
+---
+# --- After the first start ---
+#
+# The first boot on an empty database creates a superuser named `admin` with
+# the password `adminadmin` — the image does this unconditionally and there is
+# no setting to stop it. Change it before the Pangolin resource for
+# wger.iberu.me exists, or at least before anything else:
+#
+#   kubectl -n wger exec -it deploy/wger-web -c web -- \
+#     python3 manage.py changepassword admin
+#
+# Then import the ingredients, which the fixtures do not include. This
+# downloads ~400 MB from wger.de and takes a while; it is the same job the
+# worker repeats monthly:
+#
+#   kubectl -n wger exec deploy/wger-web -c web -- \
+#     python3 manage.py sync-ingredients-bulk
+#
+# Optionally, pull the exercise images now rather than waiting for the weekly
+# job:
+#
+#   kubectl -n wger exec deploy/wger-web -c web -- \
+#     python3 manage.py download-exercise-images

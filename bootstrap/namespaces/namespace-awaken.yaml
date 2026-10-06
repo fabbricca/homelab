@@ -1,0 +1,13 @@
+# AWAKEN — the Solo-Leveling-style System for real life (github.com/fabbricca/awaken).
+#
+# Enforces `restricted` like immich: the image runs as uid 10001, never needs root,
+# and keeps no state on disk — everything lives in the shared Postgres.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: awaken
+  labels:
+    app.kubernetes.io/name: awaken
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted

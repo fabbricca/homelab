@@ -1,0 +1,250 @@
+# Everything wger reads that is not a secret.
+#
+# This is upstream's config/prod.env (wger-project/docker at c2e6739, the
+# 2.7 configuration) expressed as a ConfigMap, with only the values that
+# differ from the defaults in settings/main.py, or that are worth stating
+# explicitly. The .env file is the better-commented reference for anything
+# not listed here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wger-config
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+data:
+  # ── Site ──
+  # SITE_URL is not cosmetic. It is the base of every absolute media URL the
+  # API hands out, and /api/v2/powersync-token returns SITE_URL + "/ps/" as the
+  # address the phone should sync against — get it wrong and the app logs in
+  # and then never receives any data.
+  SITE_URL: "https://wger.iberu.me"
+  # Django 4+ rejects any POST whose Origin is not listed here, and Pangolin
+  # terminates TLS, so the origin is https even though the pod speaks http.
+  CSRF_TRUSTED_ORIGINS: "https://wger.iberu.me"
+  # Trust X-Forwarded-Proto. Pangolin sets it to https at the edge and it
+  # survives newt and the Gateway intact (Keycloak relies on the same thing
+  # for its https issuer URLs). Without this Django believes every request is
+  # plain http and builds http:// links for the phone.
+  X_FORWARDED_PROTO_HEADER_SET: "True"
+  # Absolute rather than the default relative /media/ and /static/: the API
+  # response cache stores image URLs, and the mobile app needs full URLs it
+  # can fetch directly. prod.env recommends setting both behind a proxy.
+  MEDIA_URL: "https://wger.iberu.me/media/"
+  STATIC_URL: "https://wger.iberu.me/static/"
+
+  # Set once, before the first start, and then treated as fixed. The 2.7
+  # migration converts old session dates using this zone, and it remains the
+  # fallback for users whose app has not reported its own. Matches the backup
+  # CronJobs and immich.
+  TIME_ZONE: "Europe/Rome"
+  TZ: "Europe/Rome"
+
+  # ── Accounts ──
+  # Registration off from the very first start. The instance is public, and
+  # the first boot already creates an `admin` user (see the note in web.yaml),
+  # so there is nobody who needs to sign themselves up. More accounts are
+  # created by the admin in the web UI; flip this to "True" for the length of
+  # one commit if someone should register on their own instead.
+  ALLOW_REGISTRATION: "False"
+  ALLOW_GUEST_USERS: "False"
+
+  # ── Database ──
+  # The shared instance in cluster/postgres/. Name, user and password come
+  # from the wger-database Secret.
+  DJANGO_DB_ENGINE: "django.db.backends.postgresql"
+  DJANGO_DB_HOST: "postgres.postgres.svc.cluster.local"
+  DJANGO_DB_PORT: "5432"
+  # Migrations run from the web container's entrypoint on every start, which
+  # is safe only because wger-web runs a single replica with Recreate.
+  DJANGO_PERFORM_MIGRATIONS: "True"
+
+  # ── Cache and queue ──
+  # Both on the namespace-local Valkey in redis.yaml, in separate logical
+  # databases as upstream has them: 1 for Django's cache, 2 for Celery.
+  DJANGO_CACHE_BACKEND: "django_redis.cache.RedisCache"
+  DJANGO_CACHE_LOCATION: "redis://redis:6379/1"
+  DJANGO_CACHE_TIMEOUT: "1296000"
+  DJANGO_CACHE_CLIENT_CLASS: "django_redis.client.DefaultClient"
+  USE_CELERY: "True"
+  CELERY_BROKER: "redis://redis:6379/2"
+  CELERY_BACKEND: "redis://redis:6379/2"
+  # gevent greenlets, not processes, so this costs little memory. Upstream's
+  # 4 is sized for a bigger box; two keeps the weekly syncs from competing
+  # with the web workers for the same CPU.
+  CELERY_WORKER_CONCURRENCY: "2"
+
+  # ── Exercise and ingredient data ──
+  # Not synced on startup. The fixtures already load ~870 exercises on the
+  # first boot, and a sync in the entrypoint delays every single rollout by
+  # however long wger.de takes to answer. Celery keeps them current instead:
+  # each job runs weekly at a random time beat picks when it starts.
+  WGER_INSTANCE: "https://wger.de"
+  SYNC_EXERCISES_ON_STARTUP: "False"
+  DOWNLOAD_EXERCISE_IMAGES_ON_STARTUP: "False"
+  SYNC_EXERCISES_CELERY: "True"
+  SYNC_EXERCISE_IMAGES_CELERY: "True"
+  # Off: exercise videos are the one category that would make the media
+  # volume large, and the app works without them. One line to turn on.
+  SYNC_EXERCISE_VIDEOS_CELERY: "False"
+  # Keeps the exercise API response cache warm, so the first request after
+  # it expires does not have to build it.
+  CACHE_API_EXERCISES_CELERY: "True"
+  CACHE_API_EXERCISES_CELERY_FORCE_UPDATE: "True"
+  # Ingredients, i.e. the Open Food Facts data, are NOT in the fixtures: a
+  # fresh instance has none, and nutrition plans are unusable until the
+  # first sync. Celery does it monthly from the bulk dump on wger.de (~400 MB
+  # gzipped, a few GB once in Postgres); the first one is a manual step —
+  # see the end of web.yaml.
+  SYNC_INGREDIENTS_CELERY: "True"
+  # Where per-ingredient images are fetched from when an ingredient is first
+  # viewed. WGER rather than OFF: wger.de has already filtered and resized
+  # them. Needs USE_CELERY.
+  DOWNLOAD_INGREDIENTS_FROM: "WGER"
+
+  # ── Proxies ──
+  # Behind three hops: Pangolin's Traefik (which sets X-Forwarded-For to the
+  # phone's address), newt, and the Cilium Gateway's Envoy, which appends the
+  # address it received the connection from (useRemoteAddress, zero trusted
+  # hops). The nginx sidecar passes X-Forwarded-For through unchanged instead
+  # of appending, so Django sees "<client>, <hop Envoy saw>".
+  #
+  # django-axes (login lockout) reads the client from that header with an
+  # exact proxy count, so it must be 1. DRF's throttling counts from the right
+  # including the client, so it is 2. If the count is wrong, axes falls back
+  # to a single shared address — which locks everyone out together after ten
+  # failures rather than letting a client spoof its way past the limit. The
+  # nginx access log prints X-Forwarded-For for checking it.
+  AXES_ENABLED: "True"
+  AXES_FAILURE_LIMIT: "10"
+  AXES_COOLOFF_TIME: "30"
+  AXES_HANDLER: "axes.handlers.cache.AxesCacheHandler"
+  AXES_LOCKOUT_PARAMETERS: "ip_address"
+  AXES_IPWARE_PROXY_COUNT: "1"
+  AXES_IPWARE_META_PRECEDENCE_ORDER: "HTTP_X_FORWARDED_FOR,REMOTE_ADDR"
+  NUMBER_OF_PROXIES: "2"
+
+  # ── Static files ──
+  # Collected into an emptyDir on every start (see web.yaml), so they always
+  # match the image that is running. Nothing to persist, nothing to back up.
+  DJANGO_COLLECTSTATIC_ON_STARTUP: "True"
+  DJANGO_CLEAR_STATIC_FIRST: "False"
+
+  # ── Server ──
+  DJANGO_DEBUG: "False"
+  WGER_USE_GUNICORN: "True"
+  # Two workers rather than upstream's three: one or two users on a 35 W
+  # i7-6700T. --no-control-socket because gunicorn 26 otherwise tries to
+  # create ~/.gunicorn/gunicorn.ctl, which the read-only root filesystem
+  # refuses (it logs an error and carries on, but there is nothing to gain
+  # from the noise). The 240 s timeout is upstream's, for the slow PDF and
+  # ingredient endpoints.
+  GUNICORN_CMD_ARGS: "--workers 2 --threads 2 --worker-class gthread --timeout 240 --no-control-socket"
+  LOG_LEVEL_PYTHON: "INFO"
+  EXPOSE_PROMETHEUS_METRICS: "False"
+---
+# The sidecar in front of gunicorn. wger does not serve its own static or
+# media files in production (no whitenoise), and upstream's compose file says
+# outright that its nginx must be kept for exactly that reason. This is their
+# config/nginx.conf, with every departure from it marked "Changed:".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wger-nginx
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+data:
+  default.conf: |
+    # Changed: upstream's JSON log format trimmed, plus X-Forwarded-For — the
+    # value to look at when checking the proxy counts in wger-config.
+    log_format json_access escape=json
+        '{'
+            '"ts":"$time_iso8601",'
+            '"client_ip":"$remote_addr",'
+            '"xff":"$http_x_forwarded_for",'
+            '"request_method":"$request_method",'
+            '"request_uri":"$request_uri",'
+            '"status":$status,'
+            '"size":$body_bytes_sent,'
+            '"duration":$request_time,'
+            '"user_agent":"$http_user_agent"'
+        '}';
+
+    map $http_x_forwarded_proto $final_forwarded_proto {
+        default $http_x_forwarded_proto;
+        ''      $scheme;
+    }
+
+    server {
+        # Changed: 8080, because nginx-unprivileged cannot bind below 1024.
+        listen 8080;
+
+        access_log /dev/stdout json_access;
+
+        # Increase max body size to allow for video and gallery uploads.
+        client_max_body_size 100M;
+
+        location / {
+            # Changed: gunicorn is in the same pod, so localhost.
+            proxy_pass http://127.0.0.1:8000;
+
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            # Changed: passed through rather than $proxy_add_x_forwarded_for.
+            # Appending would add this pod's own loopback hop and make the
+            # proxy counts depend on an implementation detail of the pod.
+            proxy_set_header X-Forwarded-For $http_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $final_forwarded_proto;
+            proxy_set_header X-Forwarded-Host $http_host;
+
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_redirect off;
+            proxy_http_version 1.1;
+            # Changed: 300s rather than a day. Nothing long-lived goes through
+            # this location any more — the sync stream has its own below — and
+            # gunicorn gives up on a request after 240s anyway.
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        # The PowerSync endpoint the mobile app syncs over: SITE_URL + /ps/.
+        # Routed here rather than by its own HTTPRoute rule so the path is
+        # stripped exactly as upstream strips it, by proxy_pass's trailing
+        # slash, instead of relying on Gateway URL rewriting.
+        location /ps/ {
+            proxy_pass http://powersync:8080/;
+
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $http_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $final_forwarded_proto;
+
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+
+            # Sync streams are long-lived streaming responses. A buffering
+            # proxy holds the data back and the app never receives it.
+            # Changed: request buffering off as well, which wger's
+            # administration/powersync docs ask for on the upload path.
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 1d;
+            proxy_send_timeout 1d;
+            add_header X-Accel-Buffering no always;
+        }
+
+        location /static/ {
+            alias /wger/static/;
+            # collectstatic writes hashed file names, so these can be cached
+            # forever.
+            add_header Cache-Control "public, max-age=31536000, immutable" always;
+            add_header Vary "Accept-Encoding" always;
+        }
+
+        location /media/ {
+            alias /wger/media/;
+        }
+    }

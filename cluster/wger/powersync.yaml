@@ -1,0 +1,231 @@
+# PowerSync: the sync engine between wger's Postgres and the mobile app.
+#
+# --- Why this is here at all ---
+#
+# The brief was to leave it out if the Android app works without it. It does
+# not. Since app 2.x (the current release requires server 2.7), the app is
+# offline-first: routines, workout logs, sessions, measurements, nutrition
+# plans and the gallery are *read* from a local SQLite database that PowerSync
+# fills, not from the REST API. Without this service the app logs in fine —
+# auth, and creating things, still go over REST — and then shows empty lists,
+# because nothing ever populates the local tables. Upstream's install docs
+# call the PowerSync storage setup a "required one-time step" for the same
+# reason.
+#
+# --- How it is wired ---
+#
+#   phone ── /ps/ ──> Gateway ──> wger-web nginx ──> this Service :8080
+#   this pod ── logical replication slot ──> shared Postgres, wger database
+#   this pod ── JWKS fetch ──> wger-web :8080/api/v2/powersync-keys
+#
+# The phone first asks Django for a token (/api/v2/powersync-token), which
+# also tells it where to sync: SITE_URL + /ps/. It then holds a long-lived
+# streaming response open against that path. Uploads (local edits) go the
+# other way through Django's REST API, never through PowerSync.
+#
+# What it costs elsewhere: wal_level=logical on the shared Postgres, the
+# REPLICATION attribute on the wger role, and a replication slot that pins WAL
+# while this is down — capped by max_slot_wal_keep_size, see
+# cluster/postgres/deployment.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: powersync
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: powersync
+spec:
+  selector:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: powersync
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: powersync
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: powersync
+spec:
+  replicas: 1
+  # One replication slot, one consumer. Two unified instances would fight over
+  # the slot; Recreate makes sure the old one has let go first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wger
+      app.kubernetes.io/component: powersync
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wger
+        app.kubernetes.io/component: powersync
+    spec:
+      automountServiceAccountToken: false
+      # uid 901 is the user the image is built to run as.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 901
+        runAsGroup: 901
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: powersync
+          image: docker.io/journeyapps/powersync-service@sha256:413a0c813e96935ebe7203b5759f8a594a7b7cd8aa42134713e63af637e0f079  # 1.26.1
+          imagePullPolicy: IfNotPresent
+          # Unified mode — API server and replication worker in one process —
+          # exactly as upstream's compose file runs it. The image's entrypoint
+          # is `node service/lib/entry.js`; storage migrations run
+          # automatically on start.
+          args: ["start", "-r", "unified"]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: POWERSYNC_CONFIG_PATH
+              value: /config/powersync.yaml
+            # Port the API listens on (`port: !env PS_PORT`).
+            - name: PS_PORT
+              value: "8080"
+            # Where the public half of wger's JWT key is published. Through
+            # the nginx sidecar, which is the only port wger-web exposes; the
+            # config's `allow_local_jwks: true` is what permits a
+            # cluster-internal address here.
+            - name: PS_JWKS_URL
+              value: http://wger-web:8080/api/v2/powersync-keys
+          envFrom:
+            # PS_DATABASE_URI and PS_STORAGE_PG_URI.
+            - secretRef: { name: wger-powersync }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { memory: "128Mi", cpu: "50m" }
+            # The initial snapshot of the published tables is the expensive
+            # moment; afterwards it only follows the WAL of one or two users.
+            limits:   { memory: "768Mi", cpu: "1" }
+          # The service's own probe endpoints. Startup is generous because on
+          # a fresh install it starts before wger's migrations have created
+          # the publication it replicates from, and waits for it.
+          startupProbe:
+            httpGet:
+              path: /probes/startup
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /probes/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /probes/liveness
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: config
+          configMap:
+            name: powersync-config
+        - name: tmp
+          emptyDir: {}
+---
+# Compaction of PowerSync's bucket storage.
+#
+# Every insert, update and delete on a synced table is appended to an
+# operation log in the `powersync` schema, and the self-hosted service has no
+# scheduler of its own to trim it — upstream's docs say a daily `compact` from
+# cron is the expected setup. It runs online; phones keep syncing throughout.
+#
+# Worth doing here in particular because that schema lives in the shared
+# Postgres, on the same 20 GiB volume as Keycloak, and is dumped every night
+# by its backup job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: powersync-compact
+  namespace: wger
+  labels:
+    app.kubernetes.io/name: wger
+    app.kubernetes.io/component: powersync
+spec:
+  # 02:30 local, ahead of the nightly backup chain (03:15 onwards), so the
+  # dump that night is of the compacted tables.
+  schedule: "30 2 * * *"
+  timeZone: Europe/Rome
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: wger
+            app.kubernetes.io/component: powersync
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 901
+            runAsGroup: 901
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: compact
+              image: docker.io/journeyapps/powersync-service@sha256:413a0c813e96935ebe7203b5759f8a594a7b7cd8aa42134713e63af637e0f079  # 1.26.1
+              imagePullPolicy: IfNotPresent
+              # `docker compose run --rm powersync compact`, upstream's
+              # documented invocation.
+              args: ["compact"]
+              env:
+                - name: POWERSYNC_CONFIG_PATH
+                  value: /config/powersync.yaml
+                - name: PS_PORT
+                  value: "8080"
+                - name: PS_JWKS_URL
+                  value: http://wger-web:8080/api/v2/powersync-keys
+              envFrom:
+                - secretRef: { name: wger-powersync }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              volumeMounts:
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: { memory: "128Mi", cpu: "50m" }
+                limits:   { memory: "512Mi", cpu: "500m" }
+          volumes:
+            - name: config
+              configMap:
+                name: powersync-config
+            - name: tmp
+              emptyDir: {}

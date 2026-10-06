@@ -1,0 +1,44 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: wger
+# wger 2.7 — self-hosted workout, nutrition and body-measurement tracker, on
+# wger.iberu.me, with the Android app as the main client.
+#
+# Translated from upstream's docker-compose stack (wger-project/docker at
+# c2e6739, the 2.7 configuration) rather than a community chart. Upstream's
+# seven services map onto five workloads here:
+#
+#   web + nginx + celery_worker  ->  wger-web   (one pod; they share a RWO volume)
+#   celery_beat                  ->  wger-beat
+#   cache                        ->  redis      (Valkey, namespace-local)
+#   powersync                    ->  powersync
+#   db                           ->  the shared instance in cluster/postgres/
+#
+# The database is the one deliberate departure from immich and poseidon.
+# Immich needs a Postgres pinned to its own extension versions; wger needs
+# nothing but stock Postgres, which is exactly what the shared instance is
+# for. Its role and database come from postgres-provision-wger in
+# cluster/postgres/, and the nightly pg_dumpall there backs it up.
+#
+# PowerSync is included because the current Android app does not work
+# without it — see the top of powersync.yaml.
+resources:
+  # TODO: sops -e -i — secret.yaml holds placeholders and is NOT encrypted.
+  # Fill it in and encrypt it before this directory is ever committed.
+  - secret.yaml
+  - config.yaml
+  - powersync-config.yaml
+  # Datastore. Postgres is external; Valkey is the only one local.
+  - redis.yaml
+  # The media volume, claimed before the pods that mount it.
+  - media-pvc.yaml
+  # Application.
+  - web.yaml
+  - beat.yaml
+  - powersync.yaml
+  - httproute.yaml
+  # The user-uploaded part of the media volume, nightly onto the HDD. The
+  # database's backup is the shared instance's.
+  - backup-cronjob.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux
