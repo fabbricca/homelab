@@ -1,0 +1,40 @@
+# Pangolin blueprint: public resources declared in git instead of clicked into
+# the dashboard. newt applies it to its own site every time it connects
+# (BLUEPRINT_FILE in helmrelease-newt.yaml).
+#
+# Additive by construction: Pangolin matches each entry by its key (the
+# resource's niceId) and creates or updates only that resource. Resources not
+# listed here — jellyfin, immich, keycloak, … made in the dashboard — are never
+# touched; in Pangolin 1.16.2 the only code path that deletes proxy resources
+# is deleting the whole org (verified in server/lib/blueprints/proxyResources.ts).
+# Edits made in the dashboard to the resources below WILL be overwritten on the
+# next connect: this file is their source of truth.
+#
+# Same shape as the dashboard-made immich resource: TLS at the edge, no
+# Pangolin SSO (the apps authenticate themselves), plain HTTP to the Gateway.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: newt-blueprint
+  namespace: newt
+data:
+  blueprint.yaml: |
+    public-resources:
+      awaken:
+        name: awaken
+        mode: http
+        full-domain: awaken.iberu.me
+        ssl: true
+        targets:
+          - hostname: cilium-gateway-main.gateway.svc.cluster.local
+            method: http
+            port: 80
+      wger:
+        name: wger
+        mode: http
+        full-domain: wger.iberu.me
+        ssl: true
+        targets:
+          - hostname: cilium-gateway-main.gateway.svc.cluster.local
+            method: http
+            port: 80

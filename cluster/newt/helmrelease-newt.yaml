@@ -79,12 +79,20 @@ spec:
           # not been re-tested without it; it can probably return to the
           # default, one experiment at a time.
           MTU: "1100"
+          # Public resources declared in git (blueprint-configmap.yaml).
+          BLUEPRINT_FILE: /etc/newt/blueprint.yaml
         extraVolumes:
           - name: newt-home
             emptyDir: {}
+          - name: blueprint
+            configMap:
+              name: newt-blueprint
         extraVolumeMounts:
           - name: newt-home
             mountPath: /home/newt
+          - name: blueprint
+            mountPath: /etc/newt
+            readOnly: true
 
         upstream:
           # Cilium creates this LoadBalancer Service for the Gateway named
