@@ -45,7 +45,7 @@ spec:
       # API never sees a half-migrated database.
       initContainers:
         - name: migrate
-          image: fabbricca/awaken@sha256:a877cd3dfbf6664d239b16a0b55bef09f2c5e7c79f426ab7b28f39451d08fdb5  # 0.8.0-1
+          image: fabbricca/awaken@sha256:4d9b864fe7cfb7a038e895bf8777042787b6c36d69440253204c52527c083a48  # 0.8.0-2
           imagePullPolicy: IfNotPresent
           command: ["awaken", "migrate"]
           envFrom:
@@ -58,7 +58,7 @@ spec:
               drop: ["ALL"]
       containers:
         - name: awaken
-          image: fabbricca/awaken@sha256:a877cd3dfbf6664d239b16a0b55bef09f2c5e7c79f426ab7b28f39451d08fdb5  # 0.8.0-1
+          image: fabbricca/awaken@sha256:4d9b864fe7cfb7a038e895bf8777042787b6c36d69440253204c52527c083a48  # 0.8.0-2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
