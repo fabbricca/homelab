@@ -29,3 +29,12 @@ data:
           - hostname: cilium-gateway-main.gateway.svc.cluster.local
             method: http
             port: 80
+      loom:
+        name: loom
+        protocol: http
+        full-domain: loom.iberu.me
+        ssl: true
+        targets:
+          - hostname: cilium-gateway-main.gateway.svc.cluster.local
+            method: http
+            port: 80

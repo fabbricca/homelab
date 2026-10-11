@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: loom
+  namespace: loom
+  labels:
+    app.kubernetes.io/name: loom
+spec:
+  selector:
+    app.kubernetes.io/name: loom
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+# Story packages (story.yaml + authoring/ projects), turn dumps and the LLM usage log.
+# Sessions are in Postgres (backed up nightly with everything else there).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loom-data
+  namespace: loom
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loom
+  namespace: loom
+  labels:
+    app.kubernetes.io/name: loom
+spec:
+  # One replica, Recreate: turn runs and authoring jobs are in-process tasks, and the data
+  # volume is ReadWriteOnce.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loom
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loom
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: loom
+          # The server copies the bundled example stories into /data/stories on start (missing ones only).
+          image: fabbricca/loom@sha256:90108aa885d9eb0f4ab91ffca787872ce3443c96fda8a4370796a82fbae7e104  # 0.1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: loom
+          env:
+            - name: TZ
+              value: Europe/Rome
+            - name: LOOM_PUBLIC_URL
+              value: https://loom.iberu.me
+            # Keycloak, realm homelab: a public client `loom` (PKCE) with redirect
+            # me.iberu.loom:/oauthredirect; the API checks the token's audience.
+            - name: LOOM_OIDC_ISSUER
+              value: https://keycloak.iberu.me/realms/homelab
+            - name: LOOM_OIDC_AUDIENCE
+              value: loom
+            - name: LOOM_MONTHLY_SPEND_CAP_USD
+              value: "15"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 768Mi
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: loom-data
+        - name: tmp
+          emptyDir: {}

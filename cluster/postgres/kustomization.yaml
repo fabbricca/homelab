@@ -21,5 +21,7 @@ resources:
   - keycloak-provision-job.yaml
   - awaken-db-secret.yaml
   - awaken-provision-job.yaml
+  - loom-db-secret.yaml
+  - loom-provision-job.yaml
 commonLabels:
   app.kubernetes.io/managed-by: flux

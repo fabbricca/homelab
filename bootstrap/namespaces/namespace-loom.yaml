@@ -1,0 +1,13 @@
+# Loom — self-hosted AI interactive fiction (story creation + play), ~/Documents/loom.
+#
+# `restricted` like awaken: the image runs as uid 10001 and never needs root. Sessions live in
+# the shared Postgres; story packages live on the loom-data volume.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loom
+  labels:
+    app.kubernetes.io/name: loom
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted

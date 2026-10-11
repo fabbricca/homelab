@@ -1,0 +1,23 @@
+# Public like awaken: the phone plays over mobile data. Access control is the API's own
+# (Keycloak tokens); nothing is anonymous except /healthz and the web client's static files.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: loom
+  namespace: loom
+  labels:
+    app.kubernetes.io/name: loom
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - loom.iberu.me
+  rules:
+    - backendRefs:
+        - name: loom
+          port: 8000
+      timeouts:
+        # Turn streams (SSE) and authoring stages run for minutes; runs are detached, so a
+        # cut stream only means the app reconnects with Last-Event-ID.
+        request: 600s

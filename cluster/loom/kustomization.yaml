@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: loom
+# Loom — AI interactive fiction: one Deployment (API + engine + authoring pipeline + the Flutter
+# web client). Sessions and the ending collection live in the `loom` database on the shared
+# Postgres; story packages live on the loom-data volume.
+resources:
+  - secret.yaml
+  - deployment.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux
