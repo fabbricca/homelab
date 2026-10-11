@@ -49,6 +49,9 @@ spec:
         app.kubernetes.io/name: loom
     spec:
       automountServiceAccountToken: false
+      # Service links would inject LOOM_PORT=tcp://… (the Service is named loom), which collides
+      # with the server's own LOOM_* settings.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -69,6 +72,8 @@ spec:
           env:
             - name: TZ
               value: Europe/Rome
+            - name: LOOM_PORT
+              value: "8000"
             - name: LOOM_PUBLIC_URL
               value: https://loom.iberu.me
             # Keycloak, realm homelab: a public client `loom` (PKCE) with redirect
