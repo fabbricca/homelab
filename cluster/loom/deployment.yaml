@@ -61,7 +61,7 @@ spec:
       containers:
         - name: loom
           # The server copies the bundled example stories into /data/stories on start (missing ones only).
-          image: fabbricca/loom@sha256:d97f24feb90b5f9de44276d65432101ae00aabab337ea2e739c9bd5956818c81  # 0.1.6
+          image: fabbricca/loom@sha256:9ac44c6973179794ba6f2940aa9fb55071a03927e6611355e2c220f6b6dbb5ad  # 0.1.7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
