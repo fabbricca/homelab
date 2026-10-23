@@ -1,0 +1,27 @@
+# Public: friends' game clients fetch the room list, join tickets and arena files from
+# anywhere. Only /api and /healthz are routed — /internal (the match servers' heartbeat
+# channel) is loopback-only inside the pod and must never be reachable from here.
+# Arena publishing (PUT/DELETE) is guarded by the IGRIS_PUBLISH_TOKEN bearer token.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: igris
+  namespace: igris
+  labels:
+    app.kubernetes.io/name: igris
+spec:
+  parentRefs:
+    - name: main
+      namespace: gateway
+  hostnames:
+    - igris.iberu.me
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /api }
+        - path: { type: Exact, value: /healthz }
+      backendRefs:
+        - name: igris
+          port: 8080
+      timeouts:
+        # Arena files are ~100 MB (v3) and are uploaded from a home connection.
+        request: 600s

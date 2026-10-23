@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: igris
+  namespace: igris
+  labels:
+    app.kubernetes.io/name: igris
+spec:
+  selector:
+    app.kubernetes.io/name: igris
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Match traffic. Not exposed by the Gateway (HTTP only) — the newt tunnel targets this Service
+# directly through the Pangolin raw UDP resources igris-udp-2701{5..8} (cluster/newt/), and
+# public port == container port, so the lobby can hand out its own port numbers unchanged.
+apiVersion: v1
+kind: Service
+metadata:
+  name: igris-match
+  namespace: igris
+  labels:
+    app.kubernetes.io/name: igris
+spec:
+  selector:
+    app.kubernetes.io/name: igris
+  ports:
+    - { name: udp-27015, protocol: UDP, port: 27015, targetPort: 27015 }
+    - { name: udp-27016, protocol: UDP, port: 27016, targetPort: 27016 }
+    - { name: udp-27017, protocol: UDP, port: 27017, targetPort: 27017 }
+    - { name: udp-27018, protocol: UDP, port: 27018, targetPort: 27018 }
+---
+# Published arenas (/data/arenas/<slug>/arena.json + geometry). ~100 MB per v3 arena, ~15 MB
+# per v4 one. Rebuildable from the dev machine, so the default (Delete) SSD class is right.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: igris-data
+  namespace: igris
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: igris
+  namespace: igris
+  labels:
+    app.kubernetes.io/name: igris
+spec:
+  # One replica, Recreate: rooms are in-process state (the lobby owns the match server
+  # processes and the UDP port pool) and the data volume is ReadWriteOnce.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: igris
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: igris
+    spec:
+      automountServiceAccountToken: false
+      # Service links would inject IGRIS_PORT=tcp://… (the Service is named igris), which
+      # collides with the lobby's own IGRIS_PORT setting.
+      enableServiceLinks: false
+      # Match servers get SIGTERM first and up to 10 s to say goodbye to their players.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: igris
+          image: fabbricca/igris-server@sha256:2c138829ac465cd13ff8648ff8bd9fd23578160c1679c9cf848e5f407118e40e  # 0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080, protocol: TCP }
+            - { name: udp-27015, containerPort: 27015, protocol: UDP }
+            - { name: udp-27016, containerPort: 27016, protocol: UDP }
+            - { name: udp-27017, containerPort: 27017, protocol: UDP }
+            - { name: udp-27018, containerPort: 27018, protocol: UDP }
+          envFrom:
+            - secretRef:
+                name: igris
+          env:
+            - name: TZ
+              value: Europe/Rome
+            - name: IGRIS_PORT
+              value: "8080"
+            - name: IGRIS_DATA_DIR
+              value: /data
+            # What clients connect to: a DNS name for the Pangolin VPS, where the raw UDP
+            # resources listen on the same port numbers as the pool below.
+            - name: IGRIS_PUBLIC_HOST
+              value: play.iberu.me
+            - name: IGRIS_PORT_RANGE
+              value: "27015-27018"
+            - name: IGRIS_MAX_ROOMS
+              value: "4"
+            - name: IGRIS_EMPTY_TIMEOUT_S
+              value: "300"
+            # Where the Windows zip lives, shown by clients older than latest_client.
+            - name: IGRIS_DOWNLOAD_URL
+              value: ""
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # The lobby itself idles at ~50 MiB. Each match server is a headless Godot process:
+          # measured ~700 MiB RSS and ~0.2 core on the full (unstripped) v2 Bassano arena with
+          # 8 bots; the dedicated-server export strips meshes it does not collide with, so that
+          # is the ceiling. Four rooms ≈ 3 GiB. No CPU limit, like every other workload here:
+          # a throttled match server is a laggy match, and the i7-6700T has headroom.
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # HOME=/tmp: Godot writes user:// (logs, shader cache) here.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: igris-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi

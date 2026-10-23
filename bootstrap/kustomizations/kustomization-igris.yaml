@@ -1,0 +1,30 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: igris
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/igris
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  dependsOn:
+    - name: namespace-igris
+      namespace: flux-system
+    - name: gateway
+      namespace: flux-system
+    # The arena volume is a dynamically provisioned iSCSI LUN on synology-csi-ssd.
+    - name: synology-csi
+      namespace: flux-system
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: igris
+      namespace: igris

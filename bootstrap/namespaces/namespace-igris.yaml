@@ -1,0 +1,15 @@
+# Project Igris — multiplayer FPS on real-world maps (~/Documents/project_igris). The homelab
+# hosts only the backend: the lobby API, the arena files and up to four headless match servers.
+# Players' PCs do all rendering.
+#
+# `restricted` like awaken and loom: the image runs as uid 10001, never needs root, and the
+# match servers are plain child processes of the lobby inside the same container.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: igris
+  labels:
+    app.kubernetes.io/name: igris
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted

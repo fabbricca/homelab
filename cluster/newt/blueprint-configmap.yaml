@@ -38,3 +38,49 @@ data:
           - hostname: cilium-gateway-main.gateway.svc.cluster.local
             method: http
             port: 80
+      # Project Igris: the lobby API over HTTPS like the apps above …
+      igris:
+        name: igris
+        protocol: http
+        full-domain: igris.iberu.me
+        ssl: true
+        targets:
+          - hostname: cilium-gateway-main.gateway.svc.cluster.local
+            method: http
+            port: 80
+      # … and the match servers as raw UDP resources. Raw resources have no hostname: they
+      # listen on the VPS's public IP at proxy-port, so play.iberu.me is a plain DNS record
+      # for the VPS. They need, on the VPS (not in this repo): `flags.allow_raw_resources:
+      # true` in Pangolin's config.yml, `27015-27018:27015-27018/udp` on gerbil in
+      # docker-compose.yml, traefik entryPoints `udp-27015` … `udp-27018` (address
+      # ":2701x/udp"), and the ports open in the Oracle security list and host firewall.
+      # Targets must not set `method` (1.16.2 schema: server/lib/blueprints/types.ts). One
+      # resource per port: the lobby hands each room its own port and public == internal.
+      igris-udp-27015:
+        name: igris match 27015
+        protocol: udp
+        proxy-port: 27015
+        targets:
+          - hostname: igris-match.igris.svc.cluster.local
+            port: 27015
+      igris-udp-27016:
+        name: igris match 27016
+        protocol: udp
+        proxy-port: 27016
+        targets:
+          - hostname: igris-match.igris.svc.cluster.local
+            port: 27016
+      igris-udp-27017:
+        name: igris match 27017
+        protocol: udp
+        proxy-port: 27017
+        targets:
+          - hostname: igris-match.igris.svc.cluster.local
+            port: 27017
+      igris-udp-27018:
+        name: igris match 27018
+        protocol: udp
+        proxy-port: 27018
+        targets:
+          - hostname: igris-match.igris.svc.cluster.local
+            port: 27018

@@ -435,6 +435,8 @@ Two separate paths, deliberately:
 | Poseidon | Public — **stopped** | newt → Pangolin tunnel → Cilium Gateway |
 | Immich | Public | newt → Pangolin tunnel → Cilium Gateway |
 | AWAKEN | Public | newt → Pangolin tunnel → Cilium Gateway |
+| Project Igris lobby (`igris.iberu.me/api`) | Public | newt → Pangolin tunnel → Cilium Gateway |
+| Project Igris matches (`play.iberu.me`, UDP 27015–27018) | Public | Pangolin raw UDP resources → newt → `igris-match` Service (no Gateway) |
 | `talosctl`, `kubectl`, Grafana, dashboard, KubeVirt, NAS | **Private** | Tailscale |
 
 Poseidon is scaled to zero (`cluster/poseidon/`, every Deployment at

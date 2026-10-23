@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: igris
+# Project Igris backend — one Deployment: the lobby API (igris.iberu.me/api) plus a room
+# manager that spawns one headless Godot match server per room (at most four) as child
+# processes on UDP 27015–27018, published by Pangolin raw UDP resources (cluster/newt/).
+#
+# State: arena files on the igris-data volume (rebuildable — republish with
+# tools/publish_arena.sh from the game repo). Rooms live in memory and die with the pod,
+# which is fine: a match is minutes long and nobody has an account.
+resources:
+  - secret.yaml
+  - deployment.yaml
+  - httproute.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux
