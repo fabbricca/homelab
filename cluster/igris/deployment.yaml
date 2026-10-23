@@ -81,7 +81,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: igris
-          image: fabbricca/igris-server@sha256:2c138829ac465cd13ff8648ff8bd9fd23578160c1679c9cf848e5f407118e40e  # 0.1.0
+          image: fabbricca/igris-server@sha256:ac080d0155d026ed6fffb7bf8c99be38d6fa8b94826f7abe60d2a32b04d2b0cc  # 0.1.1
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
@@ -109,9 +109,9 @@ spec:
               value: "4"
             - name: IGRIS_EMPTY_TIMEOUT_S
               value: "300"
-            # Where the Windows zip lives, shown by clients older than latest_client.
+            # Download page served by the lobby itself (GET /, builds under /download/).
             - name: IGRIS_DOWNLOAD_URL
-              value: ""
+              value: "https://igris.iberu.me/"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
