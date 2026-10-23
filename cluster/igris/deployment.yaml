@@ -81,7 +81,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: igris
-          image: fabbricca/igris-server@sha256:be0c403b90b24f79f8f26e87b091f8b5e84067d196d4714ab7a60904f4cf5db8  # 0.1.2
+          image: fabbricca/igris-server@sha256:d17bbee6522873c8dbfb4bbc80d73058ac2e22205028381b3d1a8cfbc8b04b73  # 0.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
@@ -114,7 +114,12 @@ spec:
               value: "https://igris.iberu.me/"
             # Clients older than this are told a newer build is on the download page.
             - name: IGRIS_LATEST_CLIENT
-              value: "0.1.1"
+              value: "0.2.0"
+            # Match protocol 2 (weapons): older clients are refused with an update message.
+            - name: IGRIS_PROTOCOL
+              value: "2"
+            - name: IGRIS_MIN_CLIENT
+              value: "0.2.0"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
