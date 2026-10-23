@@ -81,7 +81,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: igris
-          image: fabbricca/igris-server@sha256:ac080d0155d026ed6fffb7bf8c99be38d6fa8b94826f7abe60d2a32b04d2b0cc  # 0.1.1
+          image: fabbricca/igris-server@sha256:be0c403b90b24f79f8f26e87b091f8b5e84067d196d4714ab7a60904f4cf5db8  # 0.1.2
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
@@ -112,6 +112,9 @@ spec:
             # Download page served by the lobby itself (GET /, builds under /download/).
             - name: IGRIS_DOWNLOAD_URL
               value: "https://igris.iberu.me/"
+            # Clients older than this are told a newer build is on the download page.
+            - name: IGRIS_LATEST_CLIENT
+              value: "0.1.1"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
