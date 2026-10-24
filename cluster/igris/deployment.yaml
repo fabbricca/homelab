@@ -27,10 +27,10 @@ spec:
   selector:
     app.kubernetes.io/name: igris
   ports:
-    - { name: udp-27015, protocol: UDP, port: 27015, targetPort: 27015 }
-    - { name: udp-27016, protocol: UDP, port: 27016, targetPort: 27016 }
-    - { name: udp-27017, protocol: UDP, port: 27017, targetPort: 27017 }
-    - { name: udp-27018, protocol: UDP, port: 27018, targetPort: 27018 }
+    - {name: udp-27015, protocol: UDP, port: 27015, targetPort: 27015}
+    - {name: udp-27016, protocol: UDP, port: 27016, targetPort: 27016}
+    - {name: udp-27017, protocol: UDP, port: 27017, targetPort: 27017}
+    - {name: udp-27018, protocol: UDP, port: 27018, targetPort: 27018}
 ---
 # Published arenas (/data/arenas/<slug>/arena.json + geometry). ~100 MB per v3 arena, ~15 MB
 # per v4 one. Rebuildable from the dev machine, so the default (Delete) SSD class is right.
@@ -78,18 +78,18 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001
-        seccompProfile: { type: RuntimeDefault }
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: igris
           # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
-          image: fabbricca/igris-server:0.3.1@sha256:4fc8989cd721beca4cd9d73ae54beb4b3e6062d28221640a317e985cc56e98bb # {"$imagepolicy": "igris:igris-server"}
+          image: fabbricca/igris-server:0.4.0@sha256:4f0dfa78b051540e9e876cffd3b2def2bf92cbf5b79c80e502291f2f601c4ac9 # {"$imagepolicy": "igris:igris-server"}
           imagePullPolicy: IfNotPresent
           ports:
-            - { name: http, containerPort: 8080, protocol: TCP }
-            - { name: udp-27015, containerPort: 27015, protocol: UDP }
-            - { name: udp-27016, containerPort: 27016, protocol: UDP }
-            - { name: udp-27017, containerPort: 27017, protocol: UDP }
-            - { name: udp-27018, containerPort: 27018, protocol: UDP }
+            - {name: http, containerPort: 8080, protocol: TCP}
+            - {name: udp-27015, containerPort: 27015, protocol: UDP}
+            - {name: udp-27016, containerPort: 27016, protocol: UDP}
+            - {name: udp-27017, containerPort: 27017, protocol: UDP}
+            - {name: udp-27018, containerPort: 27018, protocol: UDP}
           envFrom:
             - secretRef:
                 name: igris
@@ -117,7 +117,7 @@ spec:
             # the image tag (game and server share one version). IGRIS_PROTOCOL and
             # IGRIS_MIN_CLIENT are baked into the image from the game's version.gd.
             - name: IGRIS_LATEST_CLIENT
-              value: "0.3.1" # {"$imagepolicy": "igris:igris-server:tag"}
+              value: "0.4.0" # {"$imagepolicy": "igris:igris-server:tag"}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -135,10 +135,10 @@ spec:
             limits:
               memory: 4Gi
           readinessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: {path: /healthz, port: http}
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: {path: /healthz, port: http}
             initialDelaySeconds: 20
             periodSeconds: 30
           volumeMounts:
