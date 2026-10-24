@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: igris-osm
+# OpenStreetMap (Italy) for Project Igris's map generator (game repo ADR-042, #51), cluster-internal
+# at http://overpass.igris-osm/api/interpreter. Its own namespace because the image runs as root,
+# which igris (restricted) refuses. State: rebuildable (delete the PVC to re-import).
+resources:
+  - overpass.yaml
+commonLabels:
+  app.kubernetes.io/managed-by: flux

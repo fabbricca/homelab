@@ -1,22 +1,22 @@
 # OpenStreetMap for the map generator (Project Igris ADR-042, game repo #51): our own Overpass
 # API with Italy only (Geofabrik's extract, then Geofabrik's daily changes). Cluster-internal: no
-# HTTPRoute; the generator reads it at http://igris-overpass/api/interpreter and falls back to
+# HTTPRoute; the generator reads it at http://overpass.igris-osm/api/interpreter and falls back to
 # the public Overpass servers while this one is importing or down.
 #
 # First start: downloads italy-latest.osm.pbf (~2.2 GB), converts it to .osm.bz2 (one thread, the
 # longest step) and imports it, then serves: 2 h 35 min on the dev PC (Ryzen 7 5800H), expect ~4 h
-# here. The database is ~12 GB and grows slowly with the daily changes. State on igris-overpass:
+# here. The database is ~12 GB and grows slowly with the daily changes. State on the overpass volume:
 # rebuildable (delete the PVC to re-import from scratch).
 apiVersion: v1
 kind: Service
 metadata:
-  name: igris-overpass
-  namespace: igris
+  name: overpass
+  namespace: igris-osm
   labels:
-    app.kubernetes.io/name: igris-overpass
+    app.kubernetes.io/name: overpass
 spec:
   selector:
-    app.kubernetes.io/name: igris-overpass
+    app.kubernetes.io/name: overpass
   ports:
     - name: http
       port: 80
@@ -25,8 +25,8 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: igris-overpass
-  namespace: igris
+  name: overpass
+  namespace: igris-osm
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: synology-csi-ssd
@@ -37,27 +37,27 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: igris-overpass
-  namespace: igris
+  name: overpass
+  namespace: igris-osm
   labels:
-    app.kubernetes.io/name: igris-overpass
+    app.kubernetes.io/name: overpass
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: igris-overpass
+      app.kubernetes.io/name: overpass
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: igris-overpass
+        app.kubernetes.io/name: overpass
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
       # The image's supervisord starts as root and runs nginx, fcgiwrap, the dispatcher and the
-      # updater as their own users, so no runAsNonRoot here (the namespace's baseline policy
-      # allows it); nothing is privileged and no host paths are mounted.
+      # updater as their own users, so no runAsNonRoot here (hence the igris-osm namespace,
+      # baseline); nothing is privileged and no host paths are mounted.
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       containers:
@@ -106,4 +106,4 @@ spec:
       volumes:
         - name: db
           persistentVolumeClaim:
-            claimName: igris-overpass
+            claimName: overpass

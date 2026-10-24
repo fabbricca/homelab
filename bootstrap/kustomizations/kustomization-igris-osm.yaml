@@ -1,0 +1,20 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: igris-osm
+  namespace: flux-system
+spec:
+  interval: 15m
+  path: ./cluster/igris-osm
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # Applies bootstrap/namespaces, igris-osm included.
+    - name: namespace-igris
+      namespace: flux-system
+    # The database volume is a dynamically provisioned iSCSI LUN on synology-csi-ssd.
+    - name: synology-csi
+      namespace: flux-system

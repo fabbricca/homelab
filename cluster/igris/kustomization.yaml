@@ -12,8 +12,6 @@ resources:
   - secret.yaml
   - deployment.yaml
   - httproute.yaml
-  # OpenStreetMap (Italy) for the map generator, cluster-internal (game repo ADR-042).
-  - overpass.yaml
   # Releases: Docker Hub tag → digest bump commit here (no manual commits).
   - image-automation.yaml
 commonLabels:
