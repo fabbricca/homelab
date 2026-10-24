@@ -522,8 +522,9 @@ Remaining:
 | 8 | Network isolation once the Omada ER605 v2 arrives |
 | 9 | RBAC hardening: per-app ServiceAccounts, network policies, PSS labels |
 
-Also worth doing: Flux image automation (removes the manual digest-bump
-commits) and Loki alongside Grafana.
+Also worth doing: Flux image automation for the remaining apps (removes the
+manual digest-bump commits; Project Igris already uses it, see
+`cluster/igris/image-automation.yaml`) and Loki alongside Grafana.
 
 ---
 

@@ -81,7 +81,8 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: igris
-          image: fabbricca/igris-server@sha256:4fc8989cd721beca4cd9d73ae54beb4b3e6062d28221640a317e985cc56e98bb  # 0.3.1
+          # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
+          image: fabbricca/igris-server:0.3.1@sha256:4fc8989cd721beca4cd9d73ae54beb4b3e6062d28221640a317e985cc56e98bb # {"$imagepolicy": "igris:igris-server"}
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8080, protocol: TCP }
@@ -112,14 +113,11 @@ spec:
             # Download page served by the lobby itself (GET /, builds under /download/).
             - name: IGRIS_DOWNLOAD_URL
               value: "https://igris.iberu.me/"
-            # Clients older than this are told a newer build is on the download page.
+            # Clients older than this are told a newer build is on the download page. Follows
+            # the image tag (game and server share one version). IGRIS_PROTOCOL and
+            # IGRIS_MIN_CLIENT are baked into the image from the game's version.gd.
             - name: IGRIS_LATEST_CLIENT
-              value: "0.3.1"
-            # Match protocol 2 (weapons): older clients are refused with an update message.
-            - name: IGRIS_PROTOCOL
-              value: "2"
-            - name: IGRIS_MIN_CLIENT
-              value: "0.2.0"
+              value: "0.3.1" # {"$imagepolicy": "igris:igris-server:tag"}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

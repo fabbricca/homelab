@@ -1,0 +1,78 @@
+# Releases roll out without anyone touching this repo by hand.
+#
+#   git tag v0.3.2 in project_igris → GitHub Actions builds and pushes
+#   fabbricca/igris-server:0.3.2 → the ImageRepository below sees the tag → the ImagePolicy
+#   elects it (highest stable semver) and resolves its digest → the ImageUpdateAutomation
+#   rewrites the two marked lines in deployment.yaml and pushes a commit to main → the igris
+#   Kustomization applies it.
+#
+# The markers are in deployment.yaml: the image line (`{"$imagepolicy": "igris:igris-server"}`,
+# written as repo:tag@digest, so the Deployment stays pinned by digest) and IGRIS_LATEST_CLIENT
+# (`…:tag`). The game and server share one version number, so the image tag is the client
+# version players are told to update to. Protocol and min client are baked into the image by
+# the game repo (tools/build_server.sh) and are deliberately not set here.
+#
+# Rolling back: suspend the automation (`flux suspend image update igris -n igris`), then
+# revert the bot's commit. Without the suspend, the next run puts the newest tag straight back.
+# Pre-release tags (0.4.0-rc.1) are ignored by the semver range, so a test build can be pushed
+# to Docker Hub without going live.
+#
+# Write access: the automation pushes with the flux-system GitRepository's deploy key, which
+# has write access on github.com/fabbricca/homelab.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: igris-server
+  namespace: igris
+spec:
+  # Public on Docker Hub, so no secretRef. Spelled exactly as in deployment.yaml: the policy
+  # hands this name back to the setter.
+  image: fabbricca/igris-server
+  interval: 5m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: igris-server
+  namespace: igris
+spec:
+  imageRepositoryRef:
+    name: igris-server
+  policy:
+    semver:
+      range: ">=0.1.0"
+  # Resolve the elected tag's digest, and re-check it every interval: a tag that is pushed
+  # again (it shouldn't be, release.yml refuses to) is noticed.
+  digestReflectionPolicy: Always
+  interval: 10m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: igris
+  namespace: igris
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: fluxcdbot
+        email: fluxcdbot@users.noreply.github.com
+      messageTemplate: |
+        igris: release via Flux image automation
+
+        {{ range .Changed.Changes -}}
+        - {{ .OldValue }} -> {{ .NewValue }}
+        {{ end -}}
+    push:
+      branch: main
+  update:
+    path: ./cluster/igris
+    strategy: Setters

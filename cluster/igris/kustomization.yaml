@@ -12,5 +12,7 @@ resources:
   - secret.yaml
   - deployment.yaml
   - httproute.yaml
+  # Releases: Docker Hub tag → digest bump commit here (no manual commits).
+  - image-automation.yaml
 commonLabels:
   app.kubernetes.io/managed-by: flux
