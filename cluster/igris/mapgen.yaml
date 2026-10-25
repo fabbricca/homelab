@@ -1,0 +1,109 @@
+# Map generator (Project Igris ADR-041, game repo issue #72): takes map requests from the lobby
+# (Service igris, /internal/maps/*), runs the arena pipeline and publishes the arena back with
+# the publish token. Same image as the lobby, kept on the same version by the Flux image policy
+# below; its own pod so a generation's memory peak never touches the match servers (an OOM
+# kills only this pod; the job goes back to the queue).
+#
+# Source data (ADR-042): OpenStreetMap from our Overpass (cluster/igris-osm/; public servers
+# while it imports or is down), Overture from an Italy extract the generator keeps in its cache
+# (built while idle, refreshed at night with each monthly Overture release; 1 GB), Veneto's
+# GeoDBT areas downloaded once per start while idle (2.8 GB). A never-seen place in Italy: 34 s
+# on the dev PC, ~50 s expected here. State: that cache on igris-mapgen-cache, rebuildable from
+# public data.
+# Generated maps live on the lobby's igris-data volume, not here.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: igris-mapgen-cache
+  namespace: igris
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: synology-csi-ssd
+  resources:
+    requests:
+      storage: 15Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: igris-mapgen
+  namespace: igris
+  labels:
+    app.kubernetes.io/name: igris-mapgen
+spec:
+  # One generator, one job at a time; Recreate because the cache volume is ReadWriteOnce.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: igris-mapgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: igris-mapgen
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # On SIGTERM the generator stops its pipeline run and hands the job back to the queue.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: mapgen
+          # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
+          image: fabbricca/igris-server:0.5.0@sha256:0c2f87cb4fd8c2a0a584bbbf356eb308042dadd78b1fbd8a664057af5d3cc26e # {"$imagepolicy": "igris:igris-server"}
+          imagePullPolicy: IfNotPresent
+          command: ["igris-mapgen"]
+          env:
+            - name: TZ
+              value: Europe/Rome
+            - name: IGRIS_LOBBY_URL
+              value: http://igris:8080
+            - name: IGRIS_PUBLISH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: igris
+                  key: IGRIS_PUBLISH_TOKEN
+            # Pipeline processes in parallel: memory grows with them. With the source data
+            # local, a new place is mostly CPU: 34 s on the dev PC end to end, ~50 s here.
+            - name: IGRIS_WORKERS
+              value: "2"
+            - name: NUMBA_CACHE_DIR
+              value: /cache/numba
+            - name: IGRIS_OVERPASS_URL
+              value: http://overpass.igris-osm/api/interpreter
+            - name: IGRIS_EXTRACT_REGION
+              value: italy
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Measured with IGRIS_WORKERS=2 in a 3 GiB container, a never-seen place (Piazza Bra,
+          # Verona) from an empty cache: 2.9 GiB peak incl. page cache for ~1 min while the
+          # building data loads, 0.3-1 GiB otherwise, no OOM; 346 s. The Overture extract (a
+          # child process, never during a generation) peaked at ~2.7 GB RSS on the dev PC.
+          # No CPU limit, like every other workload here.
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: igris-mapgen-cache
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi

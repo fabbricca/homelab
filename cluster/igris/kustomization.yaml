@@ -12,6 +12,8 @@ resources:
   - secret.yaml
   - deployment.yaml
   - httproute.yaml
+  # Maps on request: the generator (game repo ADR-041/042), same image as the lobby.
+  - mapgen.yaml
   # Releases: Docker Hub tag → digest bump commit here (no manual commits).
   - image-automation.yaml
 commonLabels:
