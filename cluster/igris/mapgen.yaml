@@ -52,11 +52,11 @@ spec:
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001
-        seccompProfile: { type: RuntimeDefault }
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: mapgen
           # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
-          image: fabbricca/igris-server:0.5.0@sha256:0c2f87cb4fd8c2a0a584bbbf356eb308042dadd78b1fbd8a664057af5d3cc26e # {"$imagepolicy": "igris:igris-server"}
+          image: fabbricca/igris-server:0.6.0@sha256:5799e6f43f0a8409f0fd7e62c573e5177a5b995f0fac290f70dfc94668991908 # {"$imagepolicy": "igris:igris-server"}
           imagePullPolicy: IfNotPresent
           command: ["igris-mapgen"]
           env:
