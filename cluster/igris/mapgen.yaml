@@ -56,7 +56,7 @@ spec:
       containers:
         - name: mapgen
           # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
-          image: fabbricca/igris-server:0.7.0@sha256:ba1921cb319f9a4039be8a910ee3485c6c6fa5959c8706a42b867a9305181a4a # {"$imagepolicy": "igris:igris-server"}
+          image: fabbricca/igris-server:0.8.0@sha256:14cc2a004706f92f82b2f50095de14ee3fa04960e376dd11be9ca1797841e534 # {"$imagepolicy": "igris:igris-server"}
           imagePullPolicy: IfNotPresent
           command: ["igris-mapgen"]
           env:
