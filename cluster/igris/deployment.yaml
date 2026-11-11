@@ -82,7 +82,7 @@ spec:
       containers:
         - name: igris
           # Written by Flux image automation (image-automation.yaml): repo:tag@digest.
-          image: fabbricca/igris-server:0.15.1@sha256:985150cf74bdd5cdaea7358af17e84eb22e4b57b9c35a286fbe09d0b70afb424 # {"$imagepolicy": "igris:igris-server"}
+          image: fabbricca/igris-server:0.16.1@sha256:e2476931300caaf318b6090634cc6ce8cb08e4dba55f5ee053601a3596421b88 # {"$imagepolicy": "igris:igris-server"}
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8080, protocol: TCP}
@@ -117,7 +117,7 @@ spec:
             # the image tag (game and server share one version). IGRIS_PROTOCOL and
             # IGRIS_MIN_CLIENT are baked into the image from the game's version.gd.
             - name: IGRIS_LATEST_CLIENT
-              value: "0.15.1" # {"$imagepolicy": "igris:igris-server:tag"}
+              value: "0.16.1" # {"$imagepolicy": "igris:igris-server:tag"}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
